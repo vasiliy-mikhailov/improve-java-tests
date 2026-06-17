@@ -40,7 +40,9 @@ def _run_one(t, open_pr):
         r = panel.run_agent("openhands", dest, t["target_class"], t["target_tests"],
                             t["test_file"], t["src_file"], timeout=1800, open_pr=open_pr)
         url = (r.get("pr") or {}).get("url")
-        print("%-44s %-22s %-14s PR=%s" % (t["repo"], t["target_class"].split(".")[-1], r["verdict"], url), flush=True)
+        sb, sa, kb, ka = r.get("score_before"), r.get("score_after"), r.get("killed_before"), r.get("killed_after")
+        gain = "" if sa is None else "  %.3f->%.3f reward=+%d" % (sb, sa, (ka - kb))
+        print("%-44s %-22s %-14s%s  PR=%s" % (t["repo"], t["target_class"].split(".")[-1], r["verdict"], gain, url), flush=True)
         if r["verdict"] == "NO_BASELINE":
             import corpus_queue as _q
             _q.mark_no_baseline(t["repo"])
