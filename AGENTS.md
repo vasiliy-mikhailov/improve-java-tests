@@ -81,7 +81,7 @@ frozen eval set, `SKILL.md` installed at `.openhands/skills/`, driving the fixed
 is measured by `src/pit.py` (never self-reported); **NO_BASELINE** (un-scoreable baseline) is excluded from the
 rate, never counted as a skill FAIL. A skill edit is admitted **only if OpenHands' eval pass-rate does not
 regress** vs the pre-edit baseline; on regression the edit is reverted from backup. Gate each verdict on the
-result file MTIME **advancing**, not its existence; never hand-flip a verdict — only a real re-run updates it.
+result file MTIME **advancing**, not its existence; never hand-flip a verdict — only a real re-run updates it. **Never cap the agent mid-work** — iteration limits or short wall-clock timeouts cut it off and produce garbage / give-up (NO_GAIN/BROKE_BUILD with 0 tests landed); run iterations effectively unlimited and let the agent finish via its own stop action. The only time bound is a HIGH hang-guard (hours) to reclaim a genuinely-stuck worker, never a work limit.
 Solution search approach and hints: read the survivors OpenHands FAILS to kill (NO_GAIN/BROKE_BUILD) — they name
 the skill's weak spots; sharpen the manual there. A starved/misconfigured OpenHands fakes a FAIL — confirm
 `drop_params=False` + the starvation check before trusting it. Re-enter per skill edit.
