@@ -51,16 +51,16 @@ from the PIT report; add tests that make the suite detect it by asserting the **
 confirm the lift; keep the improvement **only if every originally-passing test still passes and no existing assertion
 was weakened** — additions are **append-only**, an existing test is never edited; recognize equivalent mutants
 and set them aside; **(framing: the skill IMPROVES the mutation score by strengthening tests to DETECT what the suite misses — not "killing"; PIT still labels a detected mutant KILLED, the tool's term)** then branch, commit the additions, and open a **private-mirror PR** (test-only diff) whose body states the score before→after.
-The score must rise from a STRONGER test, never a laxer one. The skill encodes its objective as a **reward — +1 per mutant the new tests newly detect (`killed_after − killed_before`)** — and drives it with an in-skill **Ralph loop**: it re-runs the scoped-PIT → read-survivors → add-tests → re-score cycle on itself, iterating while the reward is positive and stopping when a full pass detects nothing new (reward 0) or only equivalent mutants remain.
+The score must rise from a STRONGER test, never a laxer one. The skill encodes its objective as a **reward — +1 per mutant that no longer survives after the new tests (`survived_before − survived_after`, the reduction in PIT's surviving-mutant count; e.g. 4000 survivors → 10 = reward 3990)** — and drives it with an in-skill **Ralph loop**: it re-runs the scoped-PIT → read-survivors → add-tests → re-score cycle on itself, iterating while the reward is positive and stopping when a full pass removes no survivors (reward 0) or only equivalent mutants remain.
 Solution search approach and hints: coverage first — a high-line-coverage, low-mutation-score class is the
 richest target. Per survivor, read the mutated operator+line and write the minimal assertion that
 distinguishes original from mutant. Don't chase equivalent mutants — recognize the no-observable-effect
 pattern and skip. The wall patterns the strong-rung reference (`src/`, Qwen-driven) hits are the raw material
 for the manual; promote a pattern into `SKILL.md` only once it recurs. Re-enter when a panel run shows the host
 agent misread an instruction.
-Reward: **+1 for each mutant the added tests newly detect** — the scalar reward of a run is
-`killed_after − killed_before` (previously-surviving mutants now caught; `killed` is PIT's metric name).
-More detected mutants → higher reward. Aggregate signals: the corpus mutation-score lift
+Reward: **+1 for each mutant that no longer survives after the added tests** — the scalar reward of a
+run is `survived_before − survived_after` (the reduction in PIT's surviving-mutant count; e.g. 4000
+survivors before, 10 after → reward 3990). Fewer survivors → higher reward. Aggregate signals: the corpus mutation-score lift
 (survived% before→after) and the panel PASS rate (a run PASSES iff score rises, all baseline-passing
 tests stay green, and the PR opens).
 Attention mechanism: a panel run where an agent following `SKILL.md` fails to lift the score, weakens a test,
