@@ -51,7 +51,7 @@ from the PIT report; add tests that make the suite detect it by asserting the **
 confirm the lift; keep the improvement **only if every originally-passing test still passes and no existing assertion
 was weakened** — additions are **append-only**, an existing test is never edited; recognize equivalent mutants
 and set them aside; **(framing: the skill IMPROVES the mutation score by strengthening tests to DETECT what the suite misses — not "killing"; PIT still labels a detected mutant KILLED, the tool's term)** then branch, commit the additions, and open a **private-mirror PR** (test-only diff) whose body states the score before→after.
-The score must rise from a STRONGER test, never a laxer one.
+The score must rise from a STRONGER test, never a laxer one. The skill encodes its objective as a **reward — +1 per mutant the new tests newly detect (`killed_after − killed_before`)** — and drives it with an in-skill **Ralph loop**: it re-runs the scoped-PIT → read-survivors → add-tests → re-score cycle on itself, iterating while the reward is positive and stopping when a full pass detects nothing new (reward 0) or only equivalent mutants remain.
 Solution search approach and hints: coverage first — a high-line-coverage, low-mutation-score class is the
 richest target. Per survivor, read the mutated operator+line and write the minimal assertion that
 distinguishes original from mutant. Don't chase equivalent mutants — recognize the no-observable-effect
