@@ -26,12 +26,65 @@ ADD_OPENS = ",".join([
 
 PIT_VERSION = "1.16.1"
 JUNIT5_PLUGIN_VERSION = "1.2.1"
+# JUnit 6 unified platform+jupiter versioning (junit-platform-* == jupiter version). PIT 1.16 /
+# plugin 1.2.1 bundle JUnit Platform 1.9 and crash on JUnit >= 6 ("OutputDirectoryCreator not
+# available; unaligned junit-platform-engine/launcher"). For JUnit >= 6 use a current PIT + plugin
+# and pin junit-platform-launcher to the project's own platform version so engine == launcher.
+PIT_VERSION_NEW = "1.25.4"
+JUNIT5_PLUGIN_VERSION_NEW = "1.2.3"
 
-_PIT_PLUGIN = (
-    "<plugin><groupId>org.pitest</groupId><artifactId>pitest-maven</artifactId>"
-    "<version>" + PIT_VERSION + "</version><dependencies><dependency>"
-    "<groupId>org.pitest</groupId><artifactId>pitest-junit5-plugin</artifactId>"
-    "<version>" + JUNIT5_PLUGIN_VERSION + "</version></dependency></dependencies></plugin>")
+import re as _re
+
+
+def _verkey(v):
+    parts = _re.findall(r"\d+", v or "")
+    return tuple(int(x) for x in parts[:3]) if parts else (0,)
+
+
+def _jupiter_version(abs_repo):
+    """Highest JUnit Jupiter version the project declares (property, BOM, or literal dep)."""
+    cands = []
+    for pom in glob.glob(os.path.join(abs_repo, "**", "pom.xml"), recursive=True):
+        try:
+            txt = open(pom, encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        cands += _re.findall(r"<junit[._-]jupiter[._-]version>\s*([0-9][^<]*?)\s*</", txt)
+        cands += _re.findall(r"junit-bom</artifactId>\s*<version>\s*([0-9][^<]*?)\s*</", txt)
+        cands += _re.findall(r"junit-jupiter(?:-api|-engine|-params)?</artifactId>\s*<version>\s*([0-9][^<${][^<]*?)\s*</", txt)
+    return max(cands, key=_verkey) if cands else None
+
+
+def _platform_version(jver):
+    """Platform version for a Jupiter version: JUnit 6 unified (== jver); JUnit 5 -> 1.<minor>.<patch>."""
+    n = _re.findall(r"\d+", jver or "")
+    if not n:
+        return None
+    if int(n[0]) >= 6:
+        return jver
+    if int(n[0]) == 5 and len(n) >= 2:
+        return "1." + ".".join(n[1:3])
+    return None
+
+
+def _pit_plugin(abs_repo):
+    """The PIT plugin XML to inject, version-matched to the project's JUnit generation."""
+    jver = _jupiter_version(abs_repo)
+    if _verkey(jver)[0] >= 6:
+        plat = _platform_version(jver) or jver
+        return (
+            "<plugin><groupId>org.pitest</groupId><artifactId>pitest-maven</artifactId>"
+            "<version>" + PIT_VERSION_NEW + "</version><dependencies>"
+            "<dependency><groupId>org.pitest</groupId><artifactId>pitest-junit5-plugin</artifactId>"
+            "<version>" + JUNIT5_PLUGIN_VERSION_NEW + "</version></dependency>"
+            "<dependency><groupId>org.junit.platform</groupId>"
+            "<artifactId>junit-platform-launcher</artifactId><version>" + plat + "</version></dependency>"
+            "</dependencies></plugin>")
+    return (
+        "<plugin><groupId>org.pitest</groupId><artifactId>pitest-maven</artifactId>"
+        "<version>" + PIT_VERSION + "</version><dependencies><dependency>"
+        "<groupId>org.pitest</groupId><artifactId>pitest-junit5-plugin</artifactId>"
+        "<version>" + JUNIT5_PLUGIN_VERSION + "</version></dependency></dependencies></plugin>")
 
 
 def parse_report(path):
@@ -81,21 +134,34 @@ def _uses_junit5(abs_repo):
     return False
 
 
-def _inject_pitest(pom_path):
+def _inject_pitest(pom_path, abs_repo):
     if not os.path.exists(pom_path):
         return False
     s = open(pom_path, encoding="utf-8", errors="replace").read()
     if "pitest-maven" in s:
         return True
-    bi = s.find("<build>")
+    block = _pit_plugin(abs_repo)
+    # avoid a <build> nested in <profiles> (only active under that profile) - target the main build
+    ps, pe = s.find("<profiles>"), s.find("</profiles>")
+    def _outside(i):
+        return not (ps != -1 and pe != -1 and ps < i < pe)
+    bi, start = -1, 0
+    while True:
+        b = s.find("<build>", start)
+        if b == -1:
+            break
+        if _outside(b):
+            bi = b
+            break
+        start = b + 1
     if bi != -1:
         pi, be = s.find("<plugins>", bi), s.find("</build>", bi)
         if pi != -1 and (be == -1 or pi < be):
-            s = s[:pi + len("<plugins>")] + _PIT_PLUGIN + s[pi + len("<plugins>"):]
+            s = s[:pi + len("<plugins>")] + block + s[pi + len("<plugins>"):]
         else:
-            s = s[:be] + "<plugins>" + _PIT_PLUGIN + "</plugins>" + s[be:]
+            s = s[:be] + "<plugins>" + block + "</plugins>" + s[be:]
     elif "</project>" in s:
-        s = s.replace("</project>", "<build><plugins>" + _PIT_PLUGIN + "</plugins></build></project>", 1)
+        s = s.replace("</project>", "<build><plugins>" + block + "</plugins></build></project>", 1)
     else:
         return False
     open(pom_path, "w", encoding="utf-8").write(s)
@@ -114,7 +180,7 @@ def run_pit(repo, target_class, target_tests, jdk=21, timeout=900,
     if jdk >= 11:
         common_d += f" -DjvmArgs={ADD_OPENS}"
     if j5:
-        _inject_pitest(os.path.join(pom_dir, "pom.xml"))
+        _inject_pitest(os.path.join(pom_dir, "pom.xml"), abs_repo)
         goal = "org.pitest:pitest-maven:mutationCoverage " + common_d
     else:
         goal = f"org.pitest:pitest-maven:{pit_version}:mutationCoverage " + common_d
