@@ -58,8 +58,11 @@ distinguishes original from mutant. Don't chase equivalent mutants — recognize
 pattern and skip. The wall patterns the strong-rung reference (`src/`, Qwen-driven) hits are the raw material
 for the manual; promote a pattern into `SKILL.md` only once it recurs. Re-enter when a panel run shows the host
 agent misread an instruction.
-Reward: the corpus mutation-score lift a host agent achieves by following the skill (survived% before→after),
-and the panel PASS rate (a run PASSES iff score rises, all baseline-passing tests stay green, and the PR opens).
+Reward: **+1 for each mutant the added tests newly detect** — the scalar reward of a run is
+`killed_after − killed_before` (previously-surviving mutants now caught; `killed` is PIT's metric name).
+More detected mutants → higher reward. Aggregate signals: the corpus mutation-score lift
+(survived% before→after) and the panel PASS rate (a run PASSES iff score rises, all baseline-passing
+tests stay green, and the PR opens).
 Attention mechanism: a panel run where an agent following `SKILL.md` fails to lift the score, weakens a test,
 or breaks the build pulls this problem to fix the manual.
 
