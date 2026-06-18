@@ -169,7 +169,7 @@ def _inject_pitest(pom_path, abs_repo):
 
 
 def run_pit(repo, target_class, target_tests, jdk=21, timeout=900,
-            mutators="DEFAULTS", pit_version=PIT_VERSION):
+            mutators="ALL", pit_version=PIT_VERSION):
     abs_repo = _sandbox.abs_repo(repo)
     module = _module_of(abs_repo, target_class)
     pom_dir = abs_repo if module == "." else os.path.join(abs_repo, module)

@@ -41,11 +41,17 @@ tool's vocabulary; our job is to make the suite *catch* what it currently misses
 Let `C` = fully-qualified class, `T` = its test class or package glob.
 
 ## 2. Measure the baseline — run PIT scoped to that one class
+**Mutate with the FULL operator set — `-Dmutators=ALL`** on every `mutationCoverage` invocation
+(Gradle: `mutators = ['ALL']`). `ALL` surfaces mutation kinds `DEFAULTS` can't — removed conditionals,
+member-variable writes, switches, extra return/boundary variants — and **each surviving kind is a distinct
+test idea**. Expect *more* survivors at the start and *more* equivalents (§6), but a richer set of real
+weaknesses to fix, so more mutants ultimately killed. (Pair with `-DwithHistory=true`, §5, to keep the
+bigger mutant set fast to re-run.)
 **Maven, JUnit 4** — invoke PIT as a one-off goal, no `pom.xml` change needed:
 ```bash
 ./mvnw -B -DskipTests test-compile
 ./mvnw -B org.pitest:pitest-maven:1.15.2:mutationCoverage \
-  -DtargetClasses=C -DtargetTests=T -DoutputFormats=XML,HTML -DtimestampedReports=false
+  -DtargetClasses=C -DtargetTests=T -Dmutators=ALL -DoutputFormats=XML,HTML -DtimestampedReports=false
 ```
 **Maven, JUnit 5** — add the `pitest-junit5-plugin` to the PIT plugin in `pom.xml` (a CLI `-D` can't
 add a plugin dependency):
