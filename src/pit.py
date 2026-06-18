@@ -42,16 +42,27 @@ def _verkey(v):
 
 
 def _jupiter_version(abs_repo):
-    """Highest JUnit Jupiter version the project declares (property, BOM, or literal dep)."""
+    """Highest JUnit Jupiter/Platform version the project declares. Handles any junit-related
+    <*version> property (incl. plain `junit.version`), the junit BOM, and junit-jupiter deps -
+    resolving ${prop} references (e.g. smallrye uses <junit.version>6.x</> + ${junit.version})."""
     cands = []
     for pom in glob.glob(os.path.join(abs_repo, "**", "pom.xml"), recursive=True):
         try:
             txt = open(pom, encoding="utf-8", errors="replace").read()
         except OSError:
             continue
-        cands += _re.findall(r"<junit[._-]jupiter[._-]version>\s*([0-9][^<]*?)\s*</", txt)
-        cands += _re.findall(r"junit-bom</artifactId>\s*<version>\s*([0-9][^<]*?)\s*</", txt)
-        cands += _re.findall(r"junit-jupiter(?:-api|-engine|-params)?</artifactId>\s*<version>\s*([0-9][^<${][^<]*?)\s*</", txt)
+        # any junit-ish <*version> property, keyed by full tag name (for ${...} resolution)
+        props = {n: v for n, v in
+                 _re.findall(r"<(junit[a-zA-Z0-9._-]*version)>\s*([0-9][^<]*?)\s*</", txt, _re.I)}
+        cands += list(props.values())
+        # junit-jupiter / junit-bom dep versions, resolving a ${prop} reference if present
+        for _art, ver in _re.findall(
+                r"(junit-jupiter(?:-api|-engine|-params)?|junit-bom)</artifactId>\s*<version>\s*([^<]+?)\s*</version>", txt):
+            pm = _re.match(r"\$\{([^}]+)\}", ver)
+            if pm:
+                ver = props.get(pm.group(1), "")
+            if ver[:1].isdigit():
+                cands.append(ver)
     return max(cands, key=_verkey) if cands else None
 
 
