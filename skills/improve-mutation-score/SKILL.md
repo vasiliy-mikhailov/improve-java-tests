@@ -82,10 +82,15 @@ inactive profile is silently ignored and PIT runs with no engine (0 coverage).
 
 Report lands at `target/pit-reports/mutations.xml` (Maven) or `build/reports/pitest/mutations.xml`.
 
-## 3. Read the surviving mutants
-In `mutations.xml`, the mutants to address are `status="SURVIVED"` and `status="NO_COVERAGE"`. For
-each, read `<lineNumber>`, `<mutator>`, `<mutatedMethod>`, `<description>`. Mutation score =
-detected / total.
+## 3. Read the surviving mutants — compactly, in batches
+The mutants to address are `status="SURVIVED"` and `status="NO_COVERAGE"`. **Do NOT `cat` the whole
+`mutations.xml`** — on a mutant-dense class it is enormous, and reading it repeatedly floods your context;
+that is exactly how a God-class run drowns and dies mid-task (tens of millions of tokens, a cut-off
+response, a half-edited test left broken → BROKE_BUILD). Instead **extract only the survivors compactly**
+(grep / `xmllint` / awk out `<lineNumber>`, `<mutator>`, `<mutatedMethod>`, `<description>` for the
+`SURVIVED` / `NO_COVERAGE` rows), and on a class with **many survivors work in BATCHES**: pull ~10–20 at a
+time, kill them, re-run (§5), then take the next batch. Bounded context per pass = you can go **as deep as
+the class needs** without the report swamping the run. Mutation score = detected / total.
 
 ## 4. Strengthen the suite to catch each survivor — append-only
 **Bank a verified win early — act, don't just plan.** Do *not* read and plan every survivor before
