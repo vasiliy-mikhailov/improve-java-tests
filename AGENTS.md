@@ -55,7 +55,13 @@ the minion dies with `OutputDirectoryCreator not available`); **TestNG** → add
 plugin into the project's main `<build>`, never a `<profile>` build. A minion crash (`UNKNOWN_ERROR`) is **usually wrong wiring** — most often a **JUnit-6 project mis-detected as
 JUnit 5** (resolve the version, above), not a real instrumentation problem — or, under a too-new JDK,
 test-instrumentation too old → apply Mockito/ByteBuddy floors or `--add-opens`; run PIT scoped to **one** logic-dense,
-already-line-covered class (whole-repo mutation is too expensive); read each survivor (`file:line:mutator`)
+already-line-covered class (whole-repo mutation is too expensive). **For a HUGE class (20k+ LOC / many
+thousands of mutants — real repos have these) scope FINER: split it into method-batches and run PIT per
+batch** (PIT `excludedMethods`/method filters), so the baseline run AND the agent's context stay bounded
+per chunk and it scales to any file size. This is **chunking the work, not capping the model** — the
+alternative (mutate the whole God-class at once) drowns the agent in context (45M tokens → cut-off →
+BROKE_BUILD, as `CollectionUtils` proved) and can OOM the baseline. Never limit the agent; hand it
+tractable pieces. read each survivor (`file:line:mutator`)
 from the PIT report; add tests that make the suite detect it by asserting the **correct** behaviour; re-run PIT scoped to
 confirm the lift; keep the improvement **only if every originally-passing test still passes and no existing assertion
 was weakened** — additions are **append-only**, an existing test is never edited; recognize equivalent mutants
