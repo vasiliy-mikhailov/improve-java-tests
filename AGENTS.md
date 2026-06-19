@@ -55,13 +55,16 @@ the minion dies with `OutputDirectoryCreator not available`); **TestNG** → add
 plugin into the project's main `<build>`, never a `<profile>` build. A minion crash (`UNKNOWN_ERROR`) is **usually wrong wiring** — most often a **JUnit-6 project mis-detected as
 JUnit 5** (resolve the version, above), not a real instrumentation problem — or, under a too-new JDK,
 test-instrumentation too old → apply Mockito/ByteBuddy floors or `--add-opens`; run PIT scoped to **one** logic-dense,
-already-line-covered class (whole-repo mutation is too expensive). **For a HUGE class (20k+ LOC / many
-thousands of mutants — real repos have these) scope FINER: split it into method-batches and run PIT per
-batch** (PIT `excludedMethods`/method filters), so the baseline run AND the agent's context stay bounded
-per chunk and it scales to any file size. This is **chunking the work, not capping the model** — the
-alternative (mutate the whole God-class at once) drowns the agent in context (45M tokens → cut-off →
-BROKE_BUILD, as `CollectionUtils` proved) and can OOM the baseline. Never limit the agent; hand it
-tractable pieces. read each survivor (`file:line:mutator`)
+already-line-covered class (whole-repo mutation is too expensive). **For a HUGE class (20k+ LOC / many thousands of mutants — real repos have these) the agent works it
+METHOD BY METHOD via SUB-AGENTS.** OpenHands sub-agents are enabled in the panel runner
+(`register_builtins_agents()` + `get_default_tools(enable_sub_agents=True)`); the skill has the agent list
+the methods and **delegate each method (or small group) to a fresh sub-agent** that scopes PIT to that
+method only (`-DexcludedMethods=` the rest incl `<init>`/`<clinit>`, quoted), kills its survivors, and
+returns a summary — so every sub-task has its OWN bounded context and the class scales to any size. This is
+**chunking the work, not capping the model**: mutating the whole God-class in one context drowns the agent
+(45M tokens → cut-off → BROKE_BUILD, as `CollectionUtils` proved). (Harness-side Python method-batching of
+PIT was tried and REVERTED — fragile `<init>`/`<clinit>` shell-mangling, aggregate 85 vs 209; let the AGENT
+chunk, not python.) Never limit the agent; hand it tractable pieces. read each survivor (`file:line:mutator`)
 from the PIT report; add tests that make the suite detect it by asserting the **correct** behaviour; re-run PIT scoped to
 confirm the lift; keep the improvement **only if every originally-passing test still passes and no existing assertion
 was weakened** — additions are **append-only**, an existing test is never edited; recognize equivalent mutants
@@ -88,7 +91,7 @@ the agent. Running all three agents per edit is slow and conflates "the skill is
 — separate concerns (see the agent-parity problem).
 Contract and constraints. The learning loop runs **OpenHands only** (the primary/reference agent) against the
 frozen eval set, `SKILL.md` installed at `.openhands/skills/`, driving the fixed FP8 model. Score before/after
-is measured by `src/pit.py` (never self-reported); **NO_BASELINE** (un-scoreable baseline) AND **AGENT_ERROR** (agent crashed mid-run on an LLM/infra
+is measured by `src/pit.py` (never self-reported); every OpenHands run logs its **full dialog** (messages, reasoning, tool calls, sub-agent delegations AND each sub-agent's turn-by-turn internals) to `corpus/dialogs/<slug>.jsonl` (callback stream) + `<slug>-tree/` (Conversation `persistence_dir`); **NO_BASELINE** (un-scoreable baseline) AND **AGENT_ERROR** (agent crashed mid-run on an LLM/infra
 error — `agent_rc != 0` — leaving a partial broken file; distinct from a genuine rc=0 BROKE_BUILD where the
 agent finished but left the suite red) are **infra, excluded** from the
 rate, never counted as a skill FAIL. A skill edit is admitted **only if OpenHands' eval pass-rate does not
