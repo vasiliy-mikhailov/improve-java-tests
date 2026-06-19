@@ -14,7 +14,7 @@ import os, sys, traceback, time
 workdir, prompt = sys.argv[1], sys.argv[2]
 try:
     from openhands.sdk import LLM, Agent, Conversation, LocalWorkspace
-    from openhands.tools.preset.default import get_default_tools
+    from openhands.tools.preset.default import get_default_tools, register_builtins_agents
     from openhands.sdk.context.condenser import LLMSummarizingCondenser
     from pydantic import SecretStr
 
@@ -26,7 +26,8 @@ try:
               max_output_tokens=32768, temperature=0.0, native_tool_calling=True, **_R)
     cond = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-cond",
                max_output_tokens=4096, temperature=0.0, native_tool_calling=False, **_R)
-    agent = Agent(llm=llm, tools=get_default_tools(enable_browser=False),
+    register_builtins_agents(enable_browser=False)  # bash-runner / code-explorer / general-purpose subagents
+    agent = Agent(llm=llm, tools=get_default_tools(enable_browser=False, enable_sub_agents=True),
                   condenser=LLMSummarizingCondenser(llm=cond, max_size=40, keep_first=2))
     conv = Conversation(agent=agent, workspace=LocalWorkspace(working_dir=workdir),
                         max_iteration_per_run=int(os.environ.get("OH_MAX_ITER", "60")))
