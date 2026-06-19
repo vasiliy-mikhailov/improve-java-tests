@@ -12,7 +12,7 @@ from common import CORPUS, log
 REF = "openhands"
 PANEL = ("openhands", "opencode", "kilocode")
 SKILL_OK = {"PASS"}
-EXCLUDE = {"NO_BASELINE", None}   # infra, not an agent gap (consistent across agents)
+EXCLUDE = {"NO_BASELINE", "MINION_CRASH", None}   # infra, not an agent gap (consistent across agents)
 
 
 def parity(n=3):

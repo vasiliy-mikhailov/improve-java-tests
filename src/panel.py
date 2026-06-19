@@ -70,27 +70,68 @@ def _spec(agent, abs_repo, prompt, timeout):
                 "-e", f"OH_EVENT_LOG={ev_log}", "-e", f"OH_PERSIST_DIR={persist}"]
         inner = (f"timeout {timeout} /opt/ohvenv/bin/python "
                  f"{PROJECT}/src/panel_oh_run.py {abs_repo} {q}")
-        return "jmt-panel-openhands", envs, inner
+        return "jmt-panel-openhands", envs, inner, ev_log
     # node agents (opencode / kilocode) share one image + config-copy idiom
     envs = ["-e", f"OC_KEY={key}", "-e", f"OPENAI_API_KEY={key}", "-e", f"QWEN_API_KEY={key}"]
     cfg, cli = ("opencode", "opencode") if agent == "opencode" else ("kilo", "kilo")
     inner = (f"export HOME=/root; mkdir -p /root/.config/{cfg}; "
              f"cp /cfg/{cfg if agent=='opencode' else 'kilo'}.json /root/.config/{cfg}/opencode.json; "
              f"cd {abs_repo}; timeout {timeout} {cli} run -m qwen/qwen-3.6-27b-fp8 {q}")
-    return "jmt-panel-node", envs, inner
+    return "jmt-panel-node", envs, inner, None
 
 
 def _run_container(agent, abs_repo, prompt, timeout):
-    image, envs, inner = _spec(agent, abs_repo, prompt, timeout)
+    image, envs, inner, ev_log = _spec(agent, abs_repo, prompt, timeout)
     name = f"jmt-panel-{agent}-{int(time.time())}-{uuid.uuid4().hex[:6]}"
     args = (["docker", "run", "--rm", "--name", name, "--network", sandbox.NETWORK,
              "--memory", "6g", "--cpus", "4"] + envs +
             ["-v", f"{PROJECT}:{PROJECT}", "-v", "/var/run/docker.sock:/var/run/docker.sock",
              "-v", f"{PROJECT}/docker/jrun:/usr/local/bin/jrun:ro", "-e", f"JMT_HOME={PROJECT}",
              "-w", abs_repo, image, "bash", "-lc", inner])
-    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       text=True, timeout=timeout + 180)
-    return p.returncode, p.stdout
+    # Hang guard = STALL DETECTION, not a wall-clock cap. A productive run is never cut; only a stuck
+    # one is reaped. Watch the freshest of {OH dialog log, container stdout} mtime - while the agent
+    # emits events the files keep growing. Kill only after STALL secs of zero progress. The inner
+    # `timeout {timeout}` plus the absolute +180 line below remain a high backstop.
+    STALL = int(env("JMT_STALL_SECS", "2400"))   # 40 min with no new output = stuck
+    out_path = f"/tmp/{name}.log"
+    killed = None
+    start = time.time()
+    with open(out_path, "w") as fout:
+        proc = subprocess.Popen(args, stdout=fout, stderr=subprocess.STDOUT, text=True)
+        while proc.poll() is None:
+            now = time.time()
+            refs = [start]
+            for pth in (ev_log, out_path):
+                try:
+                    if pth and os.path.exists(pth):
+                        refs.append(os.path.getmtime(pth))
+                except OSError:
+                    pass
+            idle = now - max(refs)
+            if idle > STALL:
+                killed = "stall"
+            elif now - start > timeout + 180:
+                killed = "hard"
+            if killed:
+                subprocess.run(["docker", "rm", "-f", name],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                log("medium", "panel_hang_guard", agent=agent, why=killed,
+                    idle=int(idle), ran=int(now - start))
+                break
+            time.sleep(15)
+        proc.wait()
+    try:
+        out = open(out_path, errors="replace").read()
+    finally:
+        try:
+            os.unlink(out_path)
+        except OSError:
+            pass
+    return (124 if killed else proc.returncode), out
 
 
 def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
@@ -128,8 +169,15 @@ def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
     conserved = ntests_after >= ntests_before
 
     if not after["ok"]:
-        # agent crashed mid-run (LLM/infra error) and left a partial/broken file -> infra, not a skill fail
-        verdict = "AGENT_ERROR" if rc != 0 else "BROKE_BUILD"
+        # classify the failed re-score: agent process crash (rc!=0); PIT minion crash (forked JVM died -
+        # environmental/flaky, retry, NOT a skill fail); else a genuinely broken build the agent left.
+        _tail = after.get("log_tail", "") or ""
+        if rc != 0:
+            verdict = "AGENT_ERROR"
+        elif "Minion exited abnormally" in _tail or "UNKNOWN_ERROR" in _tail:
+            verdict = "MINION_CRASH"
+        else:
+            verdict = "BROKE_BUILD"
     elif after["killed"] > base["killed"] and conserved:
         verdict = "PASS"
     elif after["killed"] > base["killed"]:
