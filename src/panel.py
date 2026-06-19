@@ -61,8 +61,11 @@ def _spec(agent, abs_repo, prompt, timeout):
     key = env("OC_KEY") or env("QWEN_API_KEY")
     q = shlex.quote(prompt)
     if agent == "openhands":
+        slug = os.path.basename(abs_repo.rstrip("/")) + "-" + str(int(time.time()))
+        ev_log = str(CORPUS / "dialogs" / (slug + ".jsonl"))
+        os.makedirs(os.path.dirname(ev_log), exist_ok=True)
         envs = ["-e", f"OC_BASE={env('QWEN_BASE_URL')}", "-e", f"OC_MODEL={env('QWEN_MODEL')}",
-                "-e", f"OC_KEY={key}", "-e", "OH_MAX_ITER=100000"]
+                "-e", f"OC_KEY={key}", "-e", "OH_MAX_ITER=100000", "-e", f"OH_EVENT_LOG={ev_log}"]
         inner = (f"timeout {timeout} /opt/ohvenv/bin/python "
                  f"{PROJECT}/src/panel_oh_run.py {abs_repo} {q}")
         return "jmt-panel-openhands", envs, inner

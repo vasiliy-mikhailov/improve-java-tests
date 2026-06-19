@@ -9,7 +9,7 @@ Env: OC_BASE, OC_MODEL, OC_KEY (+ optional OH_MAX_ITER). LLM config per the thin
 playbook: agent max_output_tokens=32768 (262k ctx; big test-edit tool calls must not truncate),
 temperature=0.0, native tool calls; condenser tools off, 4096.
 """
-import os, sys, traceback, time
+import os, sys, traceback, time, json
 
 workdir, prompt = sys.argv[1], sys.argv[2]
 try:
@@ -29,8 +29,24 @@ try:
     register_builtins_agents(enable_browser=False)  # bash-runner / code-explorer / general-purpose subagents
     agent = Agent(llm=llm, tools=get_default_tools(enable_browser=False, enable_sub_agents=True),
                   condenser=LLMSummarizingCondenser(llm=cond, max_size=40, keep_first=2))
+    _EV = os.environ.get("OH_EVENT_LOG")
+    def _sink(event):
+        # log EVERY dialog event (messages, tool calls + args, observations, sub-agent spawns/results)
+        if not _EV:
+            return
+        try:
+            rec = event.model_dump(mode="json")
+        except Exception:
+            rec = {"repr": str(event)[:4000]}
+        rec["_kind"] = type(event).__name__
+        try:
+            with open(_EV, "a") as _f:
+                _f.write(json.dumps(rec, default=str) + "\n")
+        except Exception:
+            pass
     conv = Conversation(agent=agent, workspace=LocalWorkspace(working_dir=workdir),
-                        max_iteration_per_run=int(os.environ.get("OH_MAX_ITER", "60")))
+                        max_iteration_per_run=int(os.environ.get("OH_MAX_ITER", "60")),
+                        callbacks=[_sink])
     conv.send_message(prompt)
     # The Qwen FP8 endpoint occasionally returns malformed JSON ("Extra data ...") that litellm maps to a
     # NON-retryable BadRequestError and crashes the agent mid-edit. Re-run the conversation on such transient
