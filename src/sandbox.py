@@ -38,7 +38,7 @@ def ensure_image(jdk):
     return name
 
 
-def run(cmd, repo, jdk=21, timeout=900, name=None, mem="4g"):
+def run(cmd, repo, jdk=21, timeout=31_536_000, name=None, mem="4g"):
     """Run `cmd` (a shell string) inside the sandbox over `repo`. Returns (rc, output).
     An inner `timeout` wraps cmd; container is --rm and force-removed first if named."""
     repo = abs_repo(repo)

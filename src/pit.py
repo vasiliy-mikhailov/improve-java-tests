@@ -179,7 +179,7 @@ def _inject_pitest(pom_path, abs_repo):
     return True
 
 
-def run_pit(repo, target_class, target_tests, jdk=21, timeout=900,
+def run_pit(repo, target_class, target_tests, jdk=21, timeout=31_536_000,
             mutators="ALL", pit_version=PIT_VERSION):
     abs_repo = _sandbox.abs_repo(repo)
     module = _module_of(abs_repo, target_class)

@@ -104,7 +104,7 @@ def _run_container(agent, abs_repo, prompt, timeout):
     # one is reaped. Watch the freshest of {OH dialog log, container stdout} mtime - while the agent
     # emits events the files keep growing. Kill only after STALL secs of zero progress. The inner
     # The inner `timeout {AGENT_BACKSTOP}` plus the hard line below are a ~100y formality, never a real cap.
-    STALL = int(env("JMT_STALL_SECS", "2400"))   # 40 min with no new output = stuck
+    STALL = int(env("JMT_STALL_SECS", "31536000"))   # default 1y => effectively never; only a truly dead container is reaped
     out_path = f"/tmp/{name}.log"
     killed = None
     start = time.time()
@@ -147,14 +147,14 @@ def _run_container(agent, abs_repo, prompt, timeout):
 
 
 def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
-              jdk=21, timeout=2400, open_pr=True):
+              jdk=21, timeout=31_536_000, open_pr=True):
     assert agent in AGENTS, agent
     abs_repo = sandbox.abs_repo(repo_dir)
     jdk = jdkdetect.detect_jdk(abs_repo)
     log("fast", "panel_jdk", agent=agent, repo=repo_dir, jdk=jdk)
     test_path = os.path.join(abs_repo, test_file)
 
-    base = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=900)
+    base = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=31_536_000)
     if not base["ok"]:
         log("medium", "panel_baseline_fail", agent=agent, repo=repo_dir, cls=target_class)
         import corpus_queue as _q
@@ -180,7 +180,7 @@ def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
     except OSError:
         pass
 
-    after = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=900)
+    after = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=31_536_000)
 
     # COMPILE-GATE: a broken APPENDED test must not discard the whole run. If the re-score failed purely
     # because the test class no longer compiles (rc==0, "COMPILATION ERROR"), give the agent ONE focused
@@ -191,7 +191,7 @@ def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
         _run_container(agent, abs_repo,
                        COMPILE_FIX_PROMPT.format(tests=target_tests, errors=after["log_tail"][-3000:]),
                        timeout)
-        after = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=900)
+        after = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=31_536_000)
         if (not after["ok"]) and "COMPILATION ERROR" in (after.get("log_tail", "") or ""):
             if original_test_text is not None:
                 try:
@@ -199,7 +199,7 @@ def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
                         _tf.write(original_test_text)
                 except OSError:
                     pass
-            after = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=900)
+            after = pit.run_pit(repo_dir, target_class, target_tests, jdk=jdk, timeout=31_536_000)
             log("medium", "panel_compile_gate", agent=agent, repo=repo_dir, phase="reverted")
         else:
             log("medium", "panel_compile_gate", agent=agent, repo=repo_dir, phase="fixed")

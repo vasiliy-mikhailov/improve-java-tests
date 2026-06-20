@@ -96,7 +96,7 @@ def candidate_classes(repo_dir, max_n=12):
     return cands[:max_n]
 
 
-def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=1200):
+def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=31_536_000):
     log("medium", "gate_start", repo=repo)
     repo_dir, sha = clone(repo)
     jdk = jdkdetect.detect_jdk(repo_dir)
@@ -127,7 +127,7 @@ def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=120
         return {**rec, "admitted": False, "reason": "no_paired_target"}
     if probe_pit:
         top = cands[0]
-        probe = pit.run_pit(rec["repo_dir"], top["target_class"], top["target_tests"], jdk=jdk, timeout=600)
+        probe = pit.run_pit(rec["repo_dir"], top["target_class"], top["target_tests"], jdk=jdk, timeout=31_536_000)
         if not probe.get("ok"):
             log("medium", "gate_reject", repo=repo, reason="pit_no_baseline")
             return {**rec, "admitted": False, "reason": "pit_no_baseline"}

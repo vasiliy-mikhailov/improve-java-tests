@@ -38,7 +38,7 @@ def _run_one(t, open_pr):
     try:
         gate.clone(t["repo"], dest=str(DATA / dest))
         r = panel.run_agent("openhands", dest, t["target_class"], t["target_tests"],
-                            t["test_file"], t["src_file"], timeout=86400, open_pr=open_pr)
+                            t["test_file"], t["src_file"], timeout=31_536_000, open_pr=open_pr)
         url = (r.get("pr") or {}).get("url")
         sb, sa, kb, ka = r.get("score_before"), r.get("score_after"), r.get("killed_before"), r.get("killed_after")
         cb, ca = r.get("line_cov_before"), r.get("line_cov_after")

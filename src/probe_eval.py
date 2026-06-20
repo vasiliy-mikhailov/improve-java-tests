@@ -26,7 +26,7 @@ def probe(n=20, pool=None):
             rel = os.path.relpath(str(dest), str(PROJECT))
             abs_repo = sandbox.abs_repo(rel)
             jdk = jdkdetect.detect_jdk(abs_repo)
-            base = pit.run_pit(rel, t["target_class"], t["target_tests"], jdk=jdk, timeout=900)
+            base = pit.run_pit(rel, t["target_class"], t["target_tests"], jdk=jdk, timeout=31_536_000)
             if base.get("ok"):
                 t2 = dict(t)
                 t2["jdk"] = jdk

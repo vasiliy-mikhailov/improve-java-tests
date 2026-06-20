@@ -23,7 +23,7 @@ try:
     base = os.environ["OC_BASE"]
     model = "openai/" + os.environ["OC_MODEL"]
     key = SecretStr(os.environ["OC_KEY"])
-    _R = dict(num_retries=5, retry_min_wait=3, retry_max_wait=45)
+    _R = dict(timeout=31_536_000, num_retries=100, retry_min_wait=3, retry_max_wait=60)
     llm = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-oh",
               max_output_tokens=32768, temperature=0.0, native_tool_calling=True, **_R)
     cond = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-cond",
@@ -53,7 +53,7 @@ try:
         except Exception:
             pass
     conv = Conversation(agent=agent, workspace=LocalWorkspace(working_dir=workdir),
-                        max_iteration_per_run=int(os.environ.get("OH_MAX_ITER", "60")),
+                        max_iteration_per_run=int(os.environ.get("OH_MAX_ITER", "1000000")),
                         persistence_dir=(os.environ.get("OH_PERSIST_DIR") or None),
                         callbacks=[_sink])
     conv.send_message(prompt)

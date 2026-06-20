@@ -99,7 +99,7 @@ def _gen(src_txt, test_txt, target_class, src_name, test_name, survivors, prev=N
 
 
 def improve(repo, target_class, target_tests, test_file, src_file,
-            jdk=21, rounds=4, mutators="DEFAULTS", timeout=900):
+            jdk=21, rounds=4, mutators="DEFAULTS", timeout=31_536_000):
     abs_repo = sandbox.abs_repo(repo)
     test_path = os.path.join(abs_repo, test_file)
     src_path = os.path.join(abs_repo, src_file)

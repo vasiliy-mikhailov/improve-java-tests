@@ -35,3 +35,10 @@ green.** There is NO local JDK — run EVERY maven/PIT command through the helpe
 - `M` mutation score before -> after.
 - One line: "T compiles and all tests green" — or exactly what is still broken.
 Never dump raw build/PIT output; distill it.
+
+## Command timeout
+Give EVERY PIT/maven command a HUGE tool timeout (e.g. `timeout=31536000`, ~1 year) so the terminal
+never cuts a long PIT short. A mutant-dense method (nested loops, `-Dmutators=ALL`) can take many
+minutes. NEVER set a short command timeout for PIT; if a pass is genuinely enormous, run it in the
+background and poll its log file. A command that 'times out' is almost always YOUR timeout being too
+small, not a real hang.

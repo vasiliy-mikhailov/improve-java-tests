@@ -215,4 +215,8 @@ detected, and that the additions are append-only and green.
 - **`NO_COVERAGE`** survivors mean the line isn't executed by the scoped tests — add a test that
   **reaches** the code first, then **asserts** on it.
 - **Flaky `TIMED_OUT`** mutants flip run-to-run; compare before/after in the **same** PIT config.
+- **Give every PIT/maven command a HUGE command timeout** (~1 year, e.g. `timeout=31536000`). A
+  mutant-dense method under `-Dmutators=ALL` can run many minutes; a short per-command timeout cuts the
+  PIT pass mid-run and looks like a failure. A command that "timed out" is usually the timeout being too
+  small, not a real hang — never short-time a PIT command.
 - **Keep PIT scoped** to the one class (`targetClasses`) — unscoped mutation of a whole module runs for hours.
