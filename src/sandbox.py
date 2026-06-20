@@ -53,6 +53,8 @@ def run(cmd, repo, jdk=21, timeout=31_536_000, name=None, mem="4g"):
         subprocess.run(["docker", "rm", "-f", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         args += ["--name", name]
     args += [img, "bash", "-lc", inner]
-    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                       text=True, timeout=timeout + 120)
+    # No OUTER (Python) timeout: subprocess.run converts it to poll() milliseconds and a 1-year value
+    # overflows C INT_MAX ("timeout is too large"). The INNER coreutils `timeout {timeout}` (1y, set by
+    # callers) is the real bound and has no such limit; here we wait indefinitely for the container.
+    p = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     return p.returncode, p.stdout
