@@ -1,15 +1,14 @@
-"""Candidate discovery (P4) — a TIGHT net, not a wide one.
+"""Candidate discovery (P7) — the HIGHEST-STARRED maintained Java repos.
 
-Targets the mutation sweet spot (mid-size, maintained, single-module, test-bearing Java repos
-at HEAD) and rejects junk with ONE cheap recursive-tree call per repo (not 6 contents calls)
-BEFORE any clone. gh search = 30/min global, so this runs sequentially. Skips repos already
-gated (queue.has / is_seen) and giants.
+Policy: maintained, top-stars. Rank by stars desc and take the most popular test-bearing Java
+repos at HEAD (a merge into a popular repo is a stronger adoption signal). Multi-module is fine
+— PIT is routed to the module owning the target class. Rejects junk with ONE cheap recursive-tree
+call per repo BEFORE any clone. gh search = 30/min global, so this runs sequentially. Skips repos
+already gated (queue.has / is_seen). The size cap is a BUILD-COST guard (P8), not a popularity
+filter — it only keeps out pathological mega-monorepos the sandbox cannot build cheaply.
 """
 import json, subprocess
 import corpus_queue as queue
-
-GIANTS = {"elastic/elasticsearch", "apache/spark", "spring-projects/spring-framework",
-          "spring-projects/spring-boot", "apache/flink", "apache/kafka", "JetBrains/intellij-community"}
 
 import re
 _JUNK_NAME = re.compile(r"(example|demo|sample|tutorial|playground|workshop|learning|practice|"
@@ -51,18 +50,19 @@ def _classify(repo, branch):
     return None
 
 
-def discover(n=10, min_stars=20, max_stars=3000, max_size_kb=30000,
-             pushed_after="2024-01-01", max_scan=120):
+def discover(n=10, min_stars=1000, max_stars=200000, max_size_kb=150000,
+             pushed_after="2025-06-01", max_scan=120):
+    # maintained, top-stars: rank by stars DESC, high floor, size is only a build-cost guard
     rows = _gh_json([
         "search", "repos", "--language=java",
         f"--stars={min_stars}..{max_stars}", f"--size=<{max_size_kb}",
         "--archived=false", "--include-forks=false", f"--updated=>={pushed_after}",
-        "--sort=updated", "--order=desc", f"--limit={max_scan}",
+        "--sort=stars", "--order=desc", f"--limit={max_scan}",
         "--json", "fullName,stargazersCount,pushedAt,defaultBranch"])
     out = []
     for r in rows:
         repo = r["fullName"]
-        if repo in GIANTS or queue.has(repo) or queue.is_seen(repo):
+        if queue.has(repo) or queue.is_seen(repo):
             continue
         if _JUNK_NAME.search(repo.split("/")[1]):
             continue
