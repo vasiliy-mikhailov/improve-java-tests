@@ -28,7 +28,7 @@ case "$jdk" in 8|11|17|21|25);; *) jdk=17;; esac
 echo "module=$mod jdk=$jdk tests=$nt upstream-removed=$removed test=$tf"
 [ ! -f "$D/pom.xml" ] && [ "$mod" = "." ] && { echo "RESULT $UP SKIP not-maven"; exit 0; }
 [ "$removed" -gt 0 ] && { echo "RESULT $UP SKIP not-clean-append($removed)"; exit 0; }
-out=$(timeout 1500 docker run --rm --network mvn-cache -v "$D:$D" -v "$SX:/sx.xml:ro" -w "$D" "java-$jdk-mutation-testing-sandbox" bash -lc "mvn -B -ntp -s /sx.xml $SKIP -pl $mod -am -DskipTests install -q 2>&1 | tail -2 && echo ---TP--- && mvn -B -ntp -s /sx.xml $SKIP -pl $mod test -Dtest=${CLS}Test 2>&1 | grep -E 'Tests run:|No tests were|BUILD'" 2>&1)
+out=$(timeout 1500 docker run --rm --network mvn-cache -v "$D:$D" -v "$SX:/sx.xml:ro" -w "$D" "java-$jdk-mutation-testing-sandbox" bash -lc "git config --global --add safe.directory '*' && mvn -B -ntp -s /sx.xml $SKIP -pl $mod -am -DskipTests install -q 2>&1 | tail -2 && echo ---TP--- && mvn -B -ntp -s /sx.xml $SKIP -pl $mod test -Dtest=${CLS}Test 2>&1 | grep -E 'Tests run:|No tests were|BUILD'" 2>&1)
 echo "$out" | tail -6
 trun=$(echo "$out" | grep -oE 'Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+' | tail -1)
 if echo "$out" | grep -q 'No tests were' || [ -z "$trun" ] || echo "$out" | grep -q 'BUILD FAILURE' || echo "$trun" | grep -qE 'Failures: [1-9]|Errors: [1-9]'; then
