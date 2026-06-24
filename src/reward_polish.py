@@ -37,6 +37,57 @@ def polish(path):
     if dropped:
         fixes.append(f"dropped {dropped} unused import(s)")
 
+    # drop unused private helper methods/fields (name referenced only at its own declaration) — these
+    # are left behind when tests that used them are removed. Conservative: word-boundary count <= 1.
+    def _brace_end(s, b):
+        d = 0
+        for j in range(b, len(s)):
+            if s[j] == "{":
+                d += 1
+            elif s[j] == "}":
+                d -= 1
+                if d == 0:
+                    return j
+        return len(s) - 1
+    removed_members = 0
+    for _ in range(8):  # iterate: removing A may make its callee B unused
+        cut = None
+        for m in re.finditer(r'(?m)^[ \t]*private\s+(?:static\s+|final\s+)*[\w.$<>,\[\]]+\s+(\w+)\s*\([^;{]*\)\s*(?:throws[\w.,\s]+?)?\{', src):
+            if len(re.findall(r'\b' + re.escape(m.group(1)) + r'\b', src)) <= 1:
+                ls = src.rfind("\n", 0, m.start()) + 1
+                cut = (ls, _brace_end(src, src.index("{", m.start())) + 1)
+                break
+        if not cut:
+            for m in re.finditer(r'(?m)^[ \t]*private\s+(?:static\s+|final\s+)*[\w.$<>,\[\]\s]+?\b(\w+)\s*=[^;{]*;', src):
+                if len(re.findall(r'\b' + re.escape(m.group(1)) + r'\b', src)) <= 1:
+                    ls = src.rfind("\n", 0, m.start()) + 1
+                    cut = (ls, src.find(";", m.start()) + 1)
+                    break
+        if not cut:
+            break
+        a, b = cut
+        e = b
+        while e < len(src) and src[e] in " \t":
+            e += 1
+        if e < len(src) and src[e] == "\n":
+            e += 1
+        src = src[:a] + src[e:]
+        removed_members += 1
+    if removed_members:
+        fixes.append(f"dropped {removed_members} unused private member(s)")
+        # member removal can orphan the imports those members used — sweep imports again
+        body = re.sub(r'(?m)^\s*import\s.*;', '', src)
+        extra = 0
+        for m in list(re.finditer(r'(?m)^[ \t]*import\s+(?!static\b)([\w.]+)\s*;[ \t]*\n', src)):
+            fqn = m.group(1)
+            if fqn.endswith(".*"):
+                continue
+            if not re.search(r'\b' + re.escape(fqn.rsplit(".", 1)[-1]) + r'\b', body):
+                src = src.replace(m.group(0), "", 1)
+                extra += 1
+        if extra:
+            fixes.append(f"dropped {extra} import(s) orphaned by member removal")
+
     if fixes:
         open(path, "w", encoding="utf-8").write(src)
     return fixes
