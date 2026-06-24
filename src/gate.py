@@ -1,8 +1,11 @@
-"""Candidate gating (P3): clone HEAD, gate cheapest-first, find mutatable classes.
+"""Candidate gating (P7): clone HEAD, gate cheapest-first, find mutatable classes.
 
-Gates in order (reject fast): (1) compiles, (2) static @Test count >= threshold,
-(3) tests green. An admitted record carries candidate classes paired with their test
-class (FQCN + repo-relative source/test paths) so P2 can pick a target with no rediscovery.
+Gates in order (reject fast): (1) enough @Test + a paired Foo<-FooTest target (file scan, no build),
+(2) the target's MODULE compiles (`-pl module -am install`, NOT the whole reactor — so multi-module
+top-starred giants build one module instead of hitting compile_fail), (3) that module's tests green,
+(4) PIT baselines the target. An admitted record carries candidate classes paired with their test
+class (FQCN + repo-relative source/test paths) + the target module, so P5 picks a target with no
+rediscovery.
 """
 import os, re, subprocess, json
 import sandbox
@@ -96,6 +99,18 @@ def candidate_classes(repo_dir, max_n=12):
     return cands[:max_n]
 
 
+def _module_dir(repo_dir, target_class):
+    """repo-relative dir of the module owning target_class ('.' for the root), via pit's resolver."""
+    try:
+        return pit._module_of(repo_dir, target_class)
+    except Exception:
+        return "."
+
+
+# build flags: Nexus settings + skip plugins that fail on a shallow clone / keyless env (NOT on test quality)
+_F = "-B -q -s /sandbox-settings.xml -Dmaven.buildNumber.skip=true -Dgpg.skip=true"
+
+
 def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=31_536_000):
     log("medium", "gate_start", repo=repo)
     repo_dir, sha = clone(repo)
@@ -106,33 +121,48 @@ def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=31_
     if tool != "maven":  # Maven first; Gradle gating lands next
         return {**rec, "admitted": False, "reason": f"unsupported_build_tool:{tool}"}
 
-    rc, out = sandbox.run("mvn -B -q -s /sandbox-settings.xml -DskipTests test-compile",
-                          repo_dir, jdk=jdk, timeout=timeout)
-    if rc != 0:
-        log("medium", "gate_reject", repo=repo, reason="compile", rc=rc)
-        return {**rec, "admitted": False, "reason": "compile_fail", "log_tail": out}
-
+    # Cheapest-first, BEFORE any build: count tests + find a paired target by file scan. This also
+    # tells us which MODULE to build — so a multi-module giant builds one module, not the whole reactor
+    # (the old whole-reactor `test-compile` is why top-starred repos all hit compile_fail).
     n_tests, _ = count_tests(repo_dir)
     if n_tests < min_tests:
         return {**rec, "admitted": False, "reason": f"too_few_tests:{n_tests}"}
-
-    if run_green:
-        rc, out = sandbox.run("mvn -B -q -s /sandbox-settings.xml test", repo_dir, jdk=jdk, timeout=timeout)
-        if rc != 0:
-            log("medium", "gate_reject", repo=repo, reason="green", rc=rc)
-            return {**rec, "admitted": False, "reason": "tests_red", "log_tail": out}
-
     cands = candidate_classes(repo_dir)
     if not cands:
         return {**rec, "admitted": False, "reason": "no_paired_target"}
+
+    module = _module_dir(repo_dir, cands[0]["target_class"])
+    rec["module"] = module
+    scope = "" if module == "." else f"-pl {module} -am"
+    # build the target module + its reactor deps (skip their tests); .m2 is a persistent volume so the
+    # installed artifacts are visible to the green/PIT steps below
+    rc, out = sandbox.run(f"mvn {_F} {scope} -DskipTests install", repo_dir, jdk=jdk, timeout=timeout)
+    if rc != 0:
+        log("medium", "gate_reject", repo=repo, reason="compile", module=module, rc=rc)
+        return {**rec, "admitted": False, "reason": "compile_fail", "log_tail": out}
+
+    if run_green:
+        tscope = "" if module == "." else f"-pl {module}"
+        rc, out = sandbox.run(f"mvn {_F} {tscope} test", repo_dir, jdk=jdk, timeout=timeout)
+        if rc != 0:
+            log("medium", "gate_reject", repo=repo, reason="green", module=module, rc=rc)
+            return {**rec, "admitted": False, "reason": "tests_red", "log_tail": out}
+
     if probe_pit:
-        top = cands[0]
-        probe = pit.run_pit(rec["repo_dir"], top["target_class"], top["target_tests"], jdk=jdk, timeout=31_536_000)
-        if not probe.get("ok"):
+        # the top class (most tests) can be awkward for PIT even when others baseline cleanly;
+        # try the next few before dropping the whole repo, and admit on the first that baselines
+        probed = None
+        for cand in cands[:3]:
+            probe = pit.run_pit(rec["repo_dir"], cand["target_class"], cand["target_tests"], jdk=jdk, timeout=31_536_000)
+            if probe.get("ok"):
+                probed = (cand, probe)
+                break
+        if not probed:
             log("medium", "gate_reject", repo=repo, reason="pit_no_baseline")
             return {**rec, "admitted": False, "reason": "pit_no_baseline"}
-        rec["probe_class"] = top["target_class"]
+        cand, probe = probed
+        rec["probe_class"] = cand["target_class"]
         rec["probe_score"] = round(probe["score"], 4)
     rec.update({"admitted": True, "test_count": n_tests, "candidate_classes": cands})
-    log("slow", "gate_admit", repo=repo, test_count=n_tests, candidates=len(cands))
+    log("slow", "gate_admit", repo=repo, test_count=n_tests, candidates=len(cands), module=module)
     return rec

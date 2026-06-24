@@ -12,6 +12,9 @@ _PATS = [r"<maven\.compiler\.release>\s*([\d.]+)", r"<maven\.compiler\.target>\s
          r"<maven\.compiler\.source>\s*([\d.]+)", r"<java\.version>\s*([\d.]+)",
          r"<release>\s*([\d.]+)\s*</release>", r"<target>\s*([\d.]+)\s*</target>",
          r"<source>\s*([\d.]+)\s*</source>"]
+# enforcer requireJavaVersion pins the JDK on modern (esp. top-starred) repos: <version>[17,22)</version>
+# or <version>17</version>. Take the LOWER bound — the minimum JDK that satisfies the range.
+_ENF = re.compile(r"<requireJavaVersion>.*?<version>\s*[\[\(]?\s*([\d.]+)", re.S)
 
 
 def _norm(v):
@@ -34,6 +37,10 @@ def detect_jdk(abs_repo, default=21):
                 n = _norm(m)
                 if n:
                     found.append(n)
+        for m in _ENF.findall(txt):      # enforcer-required minimum JDK (range lower bound)
+            n = _norm(m)
+            if n:
+                found.append(n)
     if not found:
         return default
     target = max(found)              # highest declared target across modules
