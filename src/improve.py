@@ -15,7 +15,11 @@ IMPROVE_WORKERS = int(os.environ.get("IMPROVE_WORKERS", "2"))
 
 
 def _verdicts():
-    """(passed_classes, classes_with_a_pr) from prior panel result files."""
+    """(passed_classes, captured_classes). 'captured' = already persisted to the LOCAL store
+    (pr.GENERATED/<name>/meta.json), since PASSes now persist locally, not to jmt-* mirror PRs.
+    Reading the panel JSON's old pr.url would keep classes captured by now-DELETED mirrors stuck
+    in has_pr forever, so they would never re-persist their fresh (cleaner) output."""
+    import pr
     passed, has_pr = set(), set()
     for f in glob.glob(str(CORPUS / "panel" / "*.json")):
         try:
@@ -23,12 +27,15 @@ def _verdicts():
         except Exception:
             continue
         c = d.get("class")
-        if not c:
-            continue
-        if d.get("verdict") in ("PASS", "PASS_BUT_NOT_CONSERVED"):
+        if c and d.get("verdict") in ("PASS", "PASS_BUT_NOT_CONSERVED"):
             passed.add(c)
-        if (d.get("pr") or {}).get("url"):
-            has_pr.add(c)
+    for mf in glob.glob(os.path.join(pr.GENERATED, "*", "meta.json")):
+        try:
+            m = json.load(open(mf))
+        except Exception:
+            continue
+        if m.get("class"):
+            has_pr.add(m["class"])
     return passed, has_pr
 
 
