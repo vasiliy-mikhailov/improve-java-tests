@@ -7,7 +7,7 @@
 # P9 value experiment (see memory upstream-pr-campaign).
 UP=$1; CLS=$2
 SX=/home/vmihaylov/java-mutation-testing/current_attempt/docker/sandbox-settings.xml
-GEN="${JMT_GENERATED:-/home/vmihaylov/jmt-generated}/$(basename "$UP")"
+GEN="${JMT_GENERATED:-/home/vmihaylov/java-mutation-testing/current_attempt/current_iteration/jmt-generated}/$(basename "$UP")"
 slug=$(echo "$UP" | tr '/' '-'); D=/tmp/pr-$slug
 SKIP="-Dmaven.buildNumber.skip=true -Dgpg.skip=true -Dspotless.check.skip=true -Dspotless.apply.skip=true -Dcheckstyle.skip=true -Denforcer.skip=true -Dpmd.skip=true -Dspotbugs.skip=true -Djacoco.skip=true -Dlicense.skip=true"
 echo "================ $UP ($CLS) ================"

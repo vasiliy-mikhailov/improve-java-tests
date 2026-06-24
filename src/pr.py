@@ -17,7 +17,10 @@ from common import log
 # The operator dislikes per-repo jmt-* mirror repos cluttering GitHub. Instead of mirroring a PASS
 # into <login>/jmt-<name> and opening a PR there, persist the strengthened test file(s) to a local
 # store; the upstream PR pipeline reads the generated tests from here.
-GENERATED = os.environ.get("JMT_GENERATED", "/home/vmihaylov/jmt-generated")
+# MUST live under current_attempt (the only host path bind-mounted into the panel/improve containers),
+# else the persist lands in the container's ephemeral FS and is lost. current_iteration is runtime data.
+GENERATED = os.environ.get("JMT_GENERATED",
+                           "/home/vmihaylov/java-mutation-testing/current_attempt/current_iteration/jmt-generated")
 
 
 def _persist_local(abs_repo, name, result, test_files, agent=None):
