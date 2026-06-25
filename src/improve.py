@@ -69,7 +69,7 @@ def main(cycle_sleep=600, pool=500):
     with ThreadPoolExecutor(max_workers=IMPROVE_WORKERS) as ex:
         while True:
             cycle += 1
-            cands = draw.draw(pool)
+            cands = draw.draw(10**9)  # draw ALL admitted candidates — cover every class, not a top-N slice
             if not cands:
                 log("slow", "improve_dry_sleep", cycle=cycle)
                 time.sleep(cycle_sleep)
