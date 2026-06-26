@@ -219,13 +219,10 @@ rule genuinely cannot be satisfied without dropping a mutant kill, keep the kill
 the PR. **Do not stop at "tests are green" — stop at reward `1.0`** (or a documented residual you cannot
 remove without losing mutation coverage).
 
-> **Contract — no runtime dependency.** This skill is just `SKILL.md`: the reward above is computed by your
-> own line-counted judgment against the rubric, so it works in any environment (opencode, kilocode, CI, a
-> bare editor) with **no Python and no install**. A folder copy of `reward.py` may sit alongside as an
-> *optional* offline oracle that applies these exact rules mechanically (`python reward.py <TestFile>
-> --baseline <upstream copy> --green true --mut-before N --mut-after M`) — handy for a cross-check when
-> Python happens to be present, but it is **never required**. The rubric is the contract; you must be able
-> to score without it.
+> **Contract — no runtime dependency.** This skill is just `SKILL.md`: there is no script to run and
+> nothing to install. The reward above is computed by your own line-counted judgment against the rubric, so
+> it works in any environment (opencode, kilocode, CI, a bare editor) with **no Python**. The rubric is the
+> contract; you score against it directly.
 
 ## 7. Equivalent mutants are RARE — earn the right to skip one
 A truly **equivalent** mutant (semantically identical behaviour — no test can detect it: a branch with no
