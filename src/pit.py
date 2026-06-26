@@ -244,6 +244,39 @@ def _gradle_init_script(target_class, target_tests, j5, proj_path, jdk):
             .replace("__J5__", j5line).replace("__JVM__", jvm))
 
 
+
+def _gradle_wrapper_version(abs_repo):
+    for p in glob.glob(os.path.join(abs_repo, "**", "gradle", "wrapper", "gradle-wrapper.properties"), recursive=True):
+        try:
+            m = _re.search(r"gradle-(\d+)\.(\d+)", open(p, encoding="utf-8", errors="replace").read())
+        except OSError:
+            continue
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+    return None
+
+
+def _gradle_max_lts(abs_repo):
+    """Highest LTS JDK the repo's gradle wrapper can run under (the wrapper<->JDK footgun)."""
+    w = _gradle_wrapper_version(abs_repo)
+    if not w:
+        return 25
+    maj, mnr = w
+    if maj < 5:
+        return 8
+    if maj < 7:
+        return 11
+    if maj == 7 and mnr < 3:
+        return 11
+    if maj == 7:
+        return 17
+    if maj == 8 and mnr < 5:
+        return 17
+    if maj == 8:
+        return 21
+    return 25
+
+
 def _run_pit_gradle(repo, abs_repo, target_class, target_tests, jdk, timeout):
     proj_path, module_dir = _gradle_module_path(abs_repo, target_class)
     j5 = _gradle_uses_junit5(abs_repo)

@@ -154,6 +154,8 @@ def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=31_
     module = _module_dir(repo_dir, cands[0]["target_class"])
     rec["module"] = module
     if tool == "gradle":
+        jdk = min(jdk, pit._gradle_max_lts(repo_dir))  # cap to what the wrapper supports
+        rec["jdk"] = jdk
         # build (compile main+test) then run the module's tests via the repo's own wrapper; the
         # gradle plugin/dist cache is a persistent volume. PIT baseline (below) is gradle-aware.
         gw = "chmod +x gradlew 2>/dev/null; ./gradlew --no-daemon --console=plain -Dorg.gradle.java.installations.auto-download=false"
