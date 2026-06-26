@@ -6,8 +6,12 @@ SKILL.md and does its OWN PIT runs + test writing via its bash/file tools. Scori
 OUTSIDE this process (by panel.py via pit.py) — never self-reported. Run with the 3.12 venv:
   /opt/ohvenv/bin/python panel_oh_run.py <workdir> <prompt>
 Env: OC_BASE, OC_MODEL, OC_KEY (+ optional OH_MAX_ITER). LLM config per the thinking-budget
-playbook: agent max_output_tokens=32768 (262k ctx; big test-edit tool calls must not truncate),
-temperature=0.0, native tool calls; condenser tools off, 4096.
+playbook: agent max_output_tokens=65536 (the model serves 262k ctx; a 32768 cap was TRUNCATING
+big test-edit tool calls mid-JSON -> "Unterminated string" litellm BadRequestError -> AGENT_ERROR
+on dense god-classes like CursorableLinkedList. 64k fits any realistic test edit (~5000 lines) with
+2x margin AND leaves ~196k for the prompt — so neither the output truncates nor does prompt+output
+overflow the 262k context on big-class turns). temperature=0.0, native tool calls;
+condenser 4096 (summaries are short, untouched).
 """
 import os, sys, traceback, time, json
 
@@ -45,7 +49,7 @@ try:
     key = SecretStr(os.environ["OC_KEY"])
     _R = dict(timeout=31_536_000, num_retries=100, retry_min_wait=3, retry_max_wait=60)
     llm = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-oh",
-              max_output_tokens=32768, temperature=0.0, native_tool_calling=True, **_R)
+              max_output_tokens=65536, temperature=0.0, native_tool_calling=True, **_R)
     cond = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-cond",
                max_output_tokens=4096, temperature=0.0, native_tool_calling=False, **_R)
     register_builtins_agents(enable_browser=False)  # bash-runner / code-explorer / general-purpose subagents
