@@ -110,6 +110,24 @@ def _module_dir(repo_dir, target_class):
 # build flags: Nexus settings + skip plugins that fail on a shallow clone / keyless env (NOT on test quality)
 _F = "-B -q -s /sandbox-settings.xml -Dmaven.buildNumber.skip=true -Dgpg.skip=true"
 
+# jdkdetect reads the source level, but a dep/plugin (jline, spotless, ...) may need a NEWER JDK.
+_JDKERR = re.compile(r"bad class file|class file version|more recent version of the Java"
+                     r"|UnsupportedClassVersion|release version \d+ not supported|invalid target release", re.I)
+
+
+def _build_retry(cmd, repo_dir, jdk, timeout):
+    """Run cmd at jdk; on a class-file-version failure retry one LTS tier up. Returns (rc, out, jdk_used)."""
+    rc, out = sandbox.run(cmd, repo_dir, jdk=jdk, timeout=timeout)
+    if rc != 0 and _JDKERR.search(out or ""):
+        for j2 in (11, 17, 21, 25):
+            if j2 <= jdk:
+                continue
+            rc, out = sandbox.run(cmd, repo_dir, jdk=j2, timeout=timeout)
+            if not (rc != 0 and _JDKERR.search(out or "")):
+                jdk = j2
+                break
+    return rc, out, jdk
+
 
 def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=31_536_000):
     log("medium", "gate_start", repo=repo)
@@ -136,7 +154,8 @@ def gate(repo, jdk=21, min_tests=20, run_green=True, probe_pit=True, timeout=31_
     scope = "" if module == "." else f"-pl {module} -am"
     # build the target module + its reactor deps (skip their tests); .m2 is a persistent volume so the
     # installed artifacts are visible to the green/PIT steps below
-    rc, out = sandbox.run(f"mvn {_F} {scope} -DskipTests install", repo_dir, jdk=jdk, timeout=timeout)
+    rc, out, jdk = _build_retry(f"mvn {_F} {scope} -DskipTests install", repo_dir, jdk, timeout)
+    rec["jdk"] = jdk  # a class-file-version retry may have bumped the JDK — use it for green + PIT
     if rc != 0:
         log("medium", "gate_reject", repo=repo, reason="compile", module=module, rc=rc)
         return {**rec, "admitted": False, "reason": "compile_fail", "log_tail": out}
