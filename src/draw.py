@@ -1,21 +1,34 @@
 """Draw selector (P3 feeder): rank the admitted corpus and emit the top-N targets for the panel.
 
-Each admitted repo carries candidate classes (Foo<->FooTest pairs). We score each candidate by
-a blend of: class-level test density (n_test — the best single proxy for a logic-dense,
-well-covered class where survivors hide), repo test_count, and repo stars (maintained/real).
-Higher = better mutation target. Emits flat target records the panel sweep consumes directly.
+Ranking is MERGE-VALUE first: a green test on a repo no maintainer will merge is wasted, so we
+prioritize by a repo STAR TIER (the proxy for an active, merge-likely project) and only then by
+class-level test density (n_test — the best single proxy for a logic-dense, well-covered class
+where survivors hide) + repo test_count. Tiers (not raw stars) so a 1001★ repo doesn't rigidly
+outrank a 1000★ one, but every ≥1k★ repo beats every <1k one. Emits flat target records the
+panel sweep consumes directly. NB: this is scheduling, not a cap — low-star repos still drain in
+the tail; we just serve high-merge-value targets first.
 """
-import json, math
+import json
 import corpus_queue as queue
 
-W_NTEST, W_REPO_TESTS, W_STARS = 3.0, 0.05, 0.5
+W_NTEST, W_REPO_TESTS = 3.0, 0.05
+
+
+def star_tier(st):
+    st = st or 0
+    if st >= 20000: return 5
+    if st >= 10000: return 4
+    if st >= 5000:  return 3
+    if st >= 1000:  return 2
+    if st >= 500:   return 1
+    return 0
 
 
 def score(repo_rec, cand):
+    # intra-tier density score (stars handled by star_tier as the PRIMARY sort key)
     n = cand.get("n_test", 0) or 0
     tc = repo_rec.get("test_count", 0) or 0
-    st = repo_rec.get("stars", 0) or 0
-    return W_NTEST * n + W_REPO_TESTS * tc + W_STARS * math.log1p(st)
+    return W_NTEST * n + W_REPO_TESTS * tc
 
 
 def draw(n=10, build_tool="maven"):
@@ -38,7 +51,8 @@ def draw(n=10, build_tool="maven"):
                 "test_file": c["test_file"], "src_file": c["src_file"],
                 "n_test": c.get("n_test"), "score": round(score(r, c), 2),
             })
-    targets.sort(key=lambda t: -t["score"])
+    # MERGE-VALUE first: star tier is the primary key, density score the tiebreak within a tier
+    targets.sort(key=lambda t: (-star_tier(t.get("stars")), -t["score"]))
     # one candidate per repo (diversity) before filling with the rest
     seen, top, rest = set(), [], []
     for t in targets:
