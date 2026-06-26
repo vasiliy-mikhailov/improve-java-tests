@@ -4,8 +4,10 @@ Policy: maintained, top-stars. Rank by stars desc and take the most popular test
 repos at HEAD (a merge into a popular repo is a stronger adoption signal). Multi-module is fine
 — PIT is routed to the module owning the target class. Rejects junk with ONE cheap recursive-tree
 call per repo BEFORE any clone. gh search = 30/min global, so this runs sequentially. Skips repos
-already gated (queue.has / is_seen). The size cap is a BUILD-COST guard (P8), not a popularity
-filter — it only keeps out pathological mega-monorepos the sandbox cannot build cheaply.
+already gated (queue.has / is_seen). NO size cap (stoicism: don't pre-exclude by size — that was
+filtering out the very highest-value repos, spring-boot/elasticsearch/spring-framework). The gate
+builds MODULE-SCOPED (`-pl module -am`), so a mega-repo means building one module, not the whole
+reactor; a genuine build failure is root-caused at the gate, not avoided by a guess about size.
 """
 import json, subprocess
 import corpus_queue as queue
@@ -28,7 +30,8 @@ def _gh_json(args):
 
 def _classify(repo, branch):
     """One recursive-tree call: return 'maven'/'gradle' if a tractable target (root build file +
-    a src/test tree + not Android), else None. Truncation is rare under the size cap."""
+    a src/test tree + not Android), else None. Without a size cap a mega-monorepo's tree may be
+    truncated by GitHub (>100k entries) — a conservative miss (rejects), never a crash."""
     if not branch:
         return None
     p = subprocess.run(["gh", "api", f"repos/{repo}/git/trees/{branch}?recursive=1",
@@ -50,7 +53,7 @@ def _classify(repo, branch):
     return None
 
 
-def discover(n=10, min_stars=1000, max_stars=200000, max_size_kb=150000,
+def discover(n=10, min_stars=1000, max_stars=200000,
              pushed_after="2025-06-01"):
     """Infinite-depth discovery — NO arbitrary scan cap (P2/stoicism: never cap depth). GitHub
     search hard-caps at 1000 results PER QUERY, so sweep the whole star space in DESCENDING
@@ -67,7 +70,7 @@ def discover(n=10, min_stars=1000, max_stars=200000, max_size_kb=150000,
     while len(out) < n and hi >= min_stars:
         rows = _gh_json([
             "search", "repos", "--language=java",
-            f"--stars={min_stars}..{hi}", f"--size=<{max_size_kb}",
+            f"--stars={min_stars}..{hi}",
             "--archived=false", "--include-forks=false", f"--updated=>={pushed_after}",
             "--sort=stars", "--order=desc", "--limit", "1000",
             "--json", "fullName,stargazersCount,pushedAt,defaultBranch"])
