@@ -6,12 +6,13 @@ SKILL.md and does its OWN PIT runs + test writing via its bash/file tools. Scori
 OUTSIDE this process (by panel.py via pit.py) — never self-reported. Run with the 3.12 venv:
   /opt/ohvenv/bin/python panel_oh_run.py <workdir> <prompt>
 Env: OC_BASE, OC_MODEL, OC_KEY (+ optional OH_MAX_ITER). LLM config per the thinking-budget
-playbook: agent max_output_tokens=65536 (the model serves 262k ctx; a 32768 cap was TRUNCATING
-big test-edit tool calls mid-JSON -> "Unterminated string" litellm BadRequestError -> AGENT_ERROR
-on dense god-classes like CursorableLinkedList. 64k fits any realistic test edit (~5000 lines) with
-2x margin AND leaves ~196k for the prompt — so neither the output truncates nor does prompt+output
-overflow the 262k context on big-class turns). temperature=0.0, native tool calls;
-condenser 4096 (summaries are short, untouched).
+playbook: the "Unterminated string" truncation on dense god-classes is REASONING ballooning to the
+token cap (Qwen ruminates, the tool-call JSON gets sliced mid-string). Real fix (great-java-review,
+same endpoint): BOUND THE REASONING via thinking_token_budget + drop_params=False (OpenHands' default
+drop_params=True silently strips the budget off the wire), NOT just a bigger output cap. agent:
+max_output_tokens=65536 (generous OUTPUT room, now fully left for the answer since thinking is
+bounded), thinking_token_budget=8192, drop_params=False, enable_thinking=True, native tool calls.
+condenser: 4096, enable_thinking=False (thinking-on poisons summaries).
 """
 import os, sys, traceback, time, json
 
@@ -48,10 +49,25 @@ try:
     model = "openai/" + os.environ["OC_MODEL"]
     key = SecretStr(os.environ["OC_KEY"])
     _R = dict(timeout=31_536_000, num_retries=100, retry_min_wait=3, retry_max_wait=60)
+    # THE real fix for "Unterminated string" truncation (great-java-review, same Qwen endpoint):
+    # bound the REASONING, not the output. Qwen ruminates to the token cap and the tool-call JSON
+    # gets sliced mid-string. thinking_token_budget stops the rumination so </think> closes and the
+    # tool call is emitted; drop_params=False is the LINCHPIN — OpenHands defaults drop_params=True,
+    # which makes litellm strip the (unknown) thinking_token_budget off the wire (it keeps
+    # chat_template_kwargs but drops the budget). Keep the budget comfortably large (>=2048) or a
+    # too-tight cut leaks thinking into content and breaks the tool parser. With thinking bounded,
+    # the generous max_output_tokens is left fully for the answer.
+    _THINK = int(os.environ.get("JMT_THINK_BUDGET", "8192"))  # reasoning-heavy mutant work; > gjr's 2048
     llm = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-oh",
-              max_output_tokens=65536, temperature=0.0, native_tool_calling=True, **_R)
+              max_output_tokens=65536, temperature=0.0, native_tool_calling=True,
+              drop_params=False,
+              litellm_extra_body={"chat_template_kwargs": {"enable_thinking": True},
+                                  "thinking_token_budget": _THINK}, **_R)
+    # condenser: thinking OFF (thinking-on dumps CoT into the summary, poisoning the agent's history)
     cond = LLM(model=model, base_url=base, api_key=key, usage_id="jmt-cond",
-               max_output_tokens=4096, temperature=0.0, native_tool_calling=False, **_R)
+               max_output_tokens=4096, temperature=0.0, native_tool_calling=False,
+               drop_params=False,
+               litellm_extra_body={"chat_template_kwargs": {"enable_thinking": False}}, **_R)
     register_builtins_agents(enable_browser=False)  # bash-runner / code-explorer / general-purpose subagents
     # register custom JMT sub-agent types (mutation-tester) from JMT_HOME/docker/subagents;
     # register_agent_if_absent will NOT let the builtins overwrite these.
