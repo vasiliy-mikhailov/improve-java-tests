@@ -4,15 +4,27 @@ Significant = killed gain >= MIN_KILLED and score gain >= MIN_GAIN. The PR is ap
 additions; the body states the mutation score AND line coverage before->after and the mutants killed.
 
 mode="private" (default): persist the strengthened test file(s) to a LOCAL store
-  (GENERATED/<name>/) + a meta.json — NO GitHub repo is created (the operator dislikes per-repo
+  (GENERATED/<name>/) + a meta.json. NO GitHub repo is created (the operator dislikes per-repo
   jmt-* mirror repos). The upstream PR pipeline reads the generated tests from there.
 mode="upstream": fork upstream to the authed user and open the PR against upstream.
 Commits ONLY the changed test file (never build artifacts). gh provides auth.
 """
 import subprocess, time, json, os, shutil
 import reward_polish
+import wartscan
 import sandbox
 from common import log
+
+
+def _diff_added(abs_repo, tf, base_sha):
+    """The agent's '+' lines for `tf` vs the upstream base (so wart checks never blame upstream code).
+    Returns None when no base is known -> wartscan falls back to whole-file."""
+    if not base_sha:
+        return None
+    out = subprocess.run(["git", "-C", abs_repo, "diff", base_sha, "--", tf],
+                         capture_output=True, text=True).stdout
+    return "\n".join(l[1:] for l in out.splitlines()
+                     if l.startswith("+") and not l.startswith("+++"))
 
 # The operator dislikes per-repo jmt-* mirror repos cluttering GitHub. Instead of mirroring a PASS
 # into <login>/jmt-<name> and opening a PR there, persist the strengthened test file(s) to a local
@@ -23,11 +35,13 @@ GENERATED = os.environ.get("JMT_GENERATED",
                            "/home/vmihaylov/java-mutation-testing/current_attempt/current_iteration/jmt-generated")
 
 
-def _persist_local(abs_repo, name, result, test_files, agent=None):
+def _persist_local(abs_repo, name, result, test_files, agent=None, base_sha=None):
     """Copy the strengthened test file(s) to GENERATED/<name>/<repo-relative-path> + a meta.json.
-    Returns (saved_paths, out_dir). Replaces the GitHub mirror entirely."""
+    Mechanically polishes each file, then WART-GATES it (wartscan over the agent's added lines):
+    a `junk` scratch file is dropped outright; any other warts are recorded per-file in meta.json
+    with a `clean` flag, so PR-prep ships only vetted material. Returns (saved_paths, out_dir)."""
     out = os.path.join(GENERATED, name)
-    saved = []
+    saved, file_warts = [], {}
     for tf in test_files:
         src = os.path.join(abs_repo, tf)
         if not os.path.exists(src):
@@ -35,15 +49,23 @@ def _persist_local(abs_repo, name, result, test_files, agent=None):
         fixes = reward_polish.polish(src)  # mechanical 0.9->1.0 fixes (seed Random, drop unused imports)
         if fixes:
             log("medium", "reward_polish", cls=result.get("class"), file=tf, fixes=fixes)
+        warts = wartscan.scan(src, _diff_added(abs_repo, tf, base_sha))
+        if wartscan.is_junk(warts):
+            log("medium", "wart_drop_junk", cls=result.get("class"), file=tf, warts=warts)
+            continue  # scratch file (no @Test + main) -> never persist
         dest = os.path.join(out, tf)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copyfile(src, dest)
         saved.append(tf)
+        if warts:
+            file_warts[tf] = warts
+            log("medium", "wart_flag", cls=result.get("class"), file=tf, warts=warts)
     os.makedirs(out, exist_ok=True)
     meta = {"upstream_name": name, "class": result.get("class"), "agent": agent,
             "score_before": result.get("score_before"), "score_after": result.get("score_after"),
             "killed_before": result.get("killed_before"), "killed_after": result.get("killed_after"),
-            "test_files": saved, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            "test_files": saved, "warts": file_warts, "clean": not file_warts,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
     json.dump(meta, open(os.path.join(out, "meta.json"), "w"), indent=2)
     return saved, out
 
@@ -71,7 +93,7 @@ def _body(r):
         f"## Strengthen tests: kill {killed} surviving mutants in `{cls}`",
         "",
         "PIT mutation testing showed the existing suite **executes** these lines but does not "
-        "**verify** them — mutating the code left tests still green. This PR adds JUnit test "
+        "**verify** them: mutating the code left tests still green. This PR adds JUnit test "
         "methods that kill those surviving mutants by asserting the correct behaviour.",
         "",
         "| metric | before | after |",
@@ -82,17 +104,15 @@ def _body(r):
         (f"| line coverage | {r['line_cov_before']:.1%} | **{r['line_cov_after']:.1%}** |"
          if r.get('line_cov_before') is not None and r.get('line_cov_after') is not None
          else "| line coverage | n/a | n/a |"),
-        f"| test methods added | — | {r['tests_added']} |",
+        f"| test methods added | n/a | {r['tests_added']} |",
         "",
     ]
     if r.get("killed_mutants"):
         lines.append("**Mutants now killed:**")
         lines += [f"- {m}" for m in r["killed_mutants"][:20]] + [""]
     lines += [
-        "The additions are **append-only** — no existing test was modified or weakened — and "
+        "The additions are append-only (no existing test is modified or weakened) and "
         "all pass against the current code (PIT requires a green baseline).",
-        "",
-        "🤖 Generated with [Claude Code](https://claude.com/claude-code)",
     ]
     return "\n".join(lines)
 
@@ -123,15 +143,14 @@ def open_for_result(repo_full, repo_dir, result, mode="private",
     _sh(["git", "-C", abs_repo, "add", test_file])
     msg = (f"test({cls_simple}): kill {result['killed_after']-result['killed_before']} "
            f"surviving mutants ({result['score_before']:.1%} -> {result['score_after']:.1%})\n\n"
-           f"Append-only PIT-guided tests; all green.\n\n"
-           f"Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>")
+           f"Append-only PIT-guided tests; all green.")
     _sh(["git", "-C", abs_repo, "commit", "-m", msg])
 
     title = (f"Add tests killing {result['killed_after']-result['killed_before']} "
              f"PIT mutants in {cls_simple} ({result['score_before']:.0%}->{result['score_after']:.0%})")
 
     if mode == "private":
-        saved, out = _persist_local(abs_repo, name, result, [test_file])
+        saved, out = _persist_local(abs_repo, name, result, [test_file], base_sha=base_sha)
         log("slow", "pr_persisted", mode="local", path=out, cls=result["class"], files=len(saved))
         return {"opened": True, "mode": "local", "path": out, "test_files": saved, "branch": branch}
 
@@ -190,9 +209,8 @@ def open_panel_pr(repo_dir, result, agent, min_killed=1):
         _sh(["git", "-C", abs_repo, "add", f])
     msg = (f"test({cls}): {agent} killed {delta} PIT mutants "
            f"({result['score_before']:.1%} -> {result['score_after']:.1%})\n\n"
-           f"Append-only PIT-guided tests via the improve-mutation-score skill.\n\n"
-           f"Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>")
+           f"Append-only PIT-guided tests via the improve-mutation-score skill.")
     _sh(["git", "-C", abs_repo, "commit", "-m", msg])
-    saved, out = _persist_local(abs_repo, name, result, test_files, agent=agent)
+    saved, out = _persist_local(abs_repo, name, result, test_files, agent=agent, base_sha=base_sha)
     log("slow", "panel_pr", mode="local", agent=agent, path=out, cls=result["class"], files=len(saved))
     return {"opened": True, "mode": "local", "path": out, "test_files": saved, "branch": branch}
