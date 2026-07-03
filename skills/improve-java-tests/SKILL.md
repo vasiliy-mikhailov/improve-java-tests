@@ -1,6 +1,6 @@
 ---
 name: improve-java-tests
-description: Raise a Java (Maven or Gradle) project's PIT mutation score by adding tests that make the suite DETECT the mutations it currently misses: asserting real behaviour, append-only, never weakening an existing test. Use when asked to improve mutation coverage or mutation score, strengthen a Java test suite that passes but does not assert much, or turn line coverage into real verification.
+description: Raise a Java (Maven or Gradle) project's PIT mutation score by adding tests that make the suite DETECT the mutations it currently misses: asserting real behaviour, append-only, never weakening an existing test. Use when asked to improve mutation coverage or mutation score, improve or strengthen the tests for a Java class (e.g. "improve java tests of com.foo.Bar"), strengthen a Java test suite that passes but does not assert much, or turn line coverage into real verification.
 ---
 
 # Improve a Java project's PIT mutation score
@@ -96,6 +96,12 @@ time, kill them, re-run (§5), then take the next batch. Bounded context per pas
 the class needs** without the report swamping the run. Mutation score = detected / total.
 
 ## 4. Strengthen the suite to catch each survivor: append-only
+**This whole section is the per-method recipe run by a `mutation-tester` sub-agent, one method at a time.
+You are the TEST-MANAGER (§5): you do NOT run it yourself.** For each method you delegate a fresh sub-agent
+and this is what THAT sub-agent does on its one method; you read it only so your delegation brief is precise.
+Never open the editor or write a `@Test` in your own context -- if you catch yourself about to write a test,
+stop and delegate the method instead. Everything below is written to the sub-agent working its method `M`:
+
 **Bank a verified win early, act, don't just plan.** Do *not* read and plan every survivor before
 writing anything; take the **first** survivor, write its test now, run the §5 loop to confirm it lands,
 then move to the next. Each verified test locks in real progress: a perfect plan you never execute
@@ -132,8 +138,11 @@ Map the mutator to the assertion it needs:
   assertion library, imports, naming, package layout), then add methods to it, the same append-only
   discipline starting from an empty test.
 
-## 5. The Ralph loop: re-run yourself until the reward stops
-Treat §3→§4→§5 as one loop body and **repeat it on yourself**, Ralph-style, until the reward dries up:
+## 5. You are the manager: delegate one method per sub-agent; the sub-agent runs the Ralph loop
+**Your job is to delegate, not to write tests.** You list the class's methods and hand each one to a fresh
+`mutation-tester` sub-agent; you never author a `@Test` yourself. The loop below is the SUB-AGENT's inner
+loop on its one method (§3→§4 scoped to `M`), which it repeats Ralph-style until that method's survivors
+stop dropping -- you the manager do NOT run it, you delegate it and tally each sub-agent's before/after:
 
 ```
 loop:
@@ -146,44 +155,72 @@ loop:
   else                               -> read the still-SURVIVED mutants (§3), add tests (§4), continue
 ```
 
-**More than about 3 methods to cover? You are the TEST-MANAGER: delegate one method at a time, do NOT
-author them all yourself.** Writing every method's tests in YOUR own context is what drowns the run: PIT
+**You are the TEST-MANAGER for every class: delegate one method at a time, even a class with a single
+method, and do NOT author any tests yourself.** Writing every method's tests in YOUR own context is what drowns the run: PIT
 reports, file edits, and the class source pile into one conversation until it exceeds the model window and
 the response is cut off mid-edit (a truncated tool call, a broken file, a left-broken build). The cure is
 to give each method its own fresh context.
+
+**Your manager reward makes delegating the winning move: `0.9 ^ (mutants still surviving) * 0.9 ^ (test
+methods you wrote in your own context instead of delegating)`.** Delegating a method's tests to a fresh
+sub-agent leaves that second factor at 1.0; every method you author yourself instead multiplies your reward
+by another 0.9 (and grows the context that drowns the run). Reward 1.0 means every method was delegated and
+every mutant killed, so you delegate every method, always, even a class with a single method, and write
+none yourself. Each method you hand off is a factor of your score you get to keep: bank it by delegating,
+don't spend it writing tests in your own context.
+
+**As the manager, you never run PIT yourself.** Each sub-agent runs the scoped PIT for its own method --
+once before it writes anything (its `SURVIVORS_BEFORE`) and once after (its `SURVIVORS_AFTER`) -- and hands
+you back only those two numbers, never any `mutations.xml` or build output. So your context holds only a
+short before/after count per method and stays flat no matter how many methods or re-delegation rounds you
+run; the bulky PIT reports live and die inside each disposable sub-agent. Tally the sub-agents'
+`SURVIVORS_AFTER` for the running survivor count, and read `SURVIVORS_BEFORE - SURVIVORS_AFTER` to see how
+many each one actually killed.
 
 Delegate with **your environment's sub-agent / task tool** (e.g. an OpenHands `task`, a Claude Code Task).
 Pick a sub-agent that can **edit files and run tests** -- NOT a read-only "explore / analyze" agent, which
 will read the code and write nothing. **Your tool may warn "do not delegate file edits, use the editor
 directly" -- that default does NOT apply here:** the per-method test-writing IS exactly what you delegate,
-because a multi-method class does not fit in one context. This is the intended exception.
+for every class regardless of size, even a single-method one. This is the intended exception.
 
 Workflow:
 1. **List the methods** of the class (just read the source).
 2. **For each method, ONE AT A TIME (sequential, NEVER parallel: the sub-agents share one test file and
-   would collide), spawn a sub-agent and give it this brief:**
-   > Raise the PIT mutation score of method `M` of class `C` (test class `T`, JDK `<jdk>`). Run the §5
+   would collide), spawn a sub-agent and give it this brief. Every brief MUST NAME this skill and tell the
+   sub-agent to read it first: the sub-agent starts with a FRESH context and inherits none of yours, so an
+   un-named skill is an un-read skill, and a writer blind to §6 mass-produces `assertDoesNotThrow`
+   coverage-theater the judge then has to rework.**
+   > FIRST read and follow `.openhands/skills/improve-java-tests/SKILL.md` in full (you inherit none of my
+   > context; §6, the mergeability rubric, is what your added tests are graded on -- assert the real
+   > behaviour, never write an `assertDoesNotThrow`-only test). Then raise the PIT mutation score of method
+   > `M` of class `C` (test class `T`, JDK `<jdk>`). Run the §5
    > loop scoped to `M` ONLY: keep `-DtargetClasses=C -DtargetTests=T` and add
    > `-DexcludedMethods="<every OTHER method of C, plus <init>,<clinit>>"` (keep it QUOTED so the shell
-   > never treats `<init>` as a redirect). Read `M`'s surviving mutants, APPEND `@Test` methods named
+   > never treats `<init>` as a redirect). **Run the scoped PIT FIRST to confirm how many mutants survive in
+   > `M`** (that is your `SURVIVORS_BEFORE`), read those survivors, APPEND `@Test` methods named
    > `test<Method>_<case>` (never modify an existing test, never touch production code), run them, FIX any
-   > compile/red breakage, and re-run the scoped PIT until survivors stop dropping. PIT is slow on a
-   > mutant-dense method -- give every command a huge timeout and be patient; a slow command is not a hang.
-   > Report back SHORT: the `@Test` names added, `M`'s score before->after, and "T compiles + all green" (or
-   > exactly what is still broken). Never paste raw PIT / build output back -- distill it.
-3. You do NOT touch the test file yourself between delegations. Move to the next method.
-4. When every method is done, run ONE whole-class PIT (no `withHistory`) to confirm the overall score rose and
-   ALL tests compile + are green. If the build is broken, delegate the fix to a sub-agent (hand it the javac
-   errors).
+   > compile/red breakage, and re-run the scoped PIT until survivors stop dropping; **run one last scoped
+   > PIT to read the remaining count** (that is your `SURVIVORS_AFTER`). PIT is slow on a mutant-dense
+   > method -- give every command a huge timeout and be patient; a slow command is not a hang. Report back
+   > SHORT: the `@Test` names added, "T compiles + all green" (or exactly what is still broken), and END
+   > with exactly two lines -- `SURVIVORS_BEFORE: <b>` then `SURVIVORS_AFTER: <a>` (the method's PIT
+   > survivor count before and after your work, `0` if you killed them all). Never paste raw PIT / build
+   > output back -- distill it to those numbers; they are the only signal I get from you.
+3. You do NOT touch the test file yourself between delegations. Move to the next method. Re-delegate a
+   method only while it is still making progress (its `SURVIVORS_AFTER` came back above 0 but below its
+   `SURVIVORS_BEFORE`); stop on it once it reports `SURVIVORS_AFTER: 0` or its count stops dropping.
+4. When every method is done, run (or, if you have no terminal, delegate / let the harness run) ONE
+   whole-class PIT (no `withHistory`) to confirm the overall score rose and ALL tests compile + are green.
+   If the build is broken, delegate the fix to a sub-agent (hand it the javac errors).
 5. Have the result scored by a separate sub-agent, not by your own opinion (§6). A self-score earns nothing
    here: the reward that counts comes from a fresh sub-agent that did not write these tests and shares none of
    your context. Give it the test class and the §6 rubric and let it score the added diff. If its reward is
    below `1.0`, delegate fixes for the offending lines to a writer sub-agent (without dropping a kill) and
    re-judge until the judge reaches `1.0`.
 6. You are done when the whole-class build is green, the mutation score is up, and the judge's reward is `1.0`.
-For a tiny class (1-3 methods) just write the tests yourself, then still hand them to a separate judge to
-score (a self-score earns nothing); the delegation overhead only pays off past
-one context's worth of work.
+Even a single-method class is delegated: hand its one method to a sub-agent, then have a separate sub-agent
+judge the result (a self-score earns nothing). Never write tests in your own context, whatever the class
+size; the flat manager context and the clean per-method reward are worth the delegation overhead every time.
 
 **Make the loop cheap so you can be exhaustive:** add **`-DwithHistory=true`** to your iterative PIT
 re-runs. PIT caches results for unchanged production code + tests and only re-evaluates the mutants your

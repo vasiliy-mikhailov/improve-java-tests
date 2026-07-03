@@ -17,7 +17,7 @@ SKILL_REL = ".openhands/skills/improve-java-tests/SKILL.md"
 # only real reaper is STALL DETECTION (IJT_STALL_SECS of zero new output) in _run_container.
 AGENT_BACKSTOP = 100 * 365 * 24 * 3600
 TEST_ANNO = re.compile(r"@(Test|ParameterizedTest|RepeatedTest)\b")
-AGENTS = ("openhands", "opencode", "kilocode")
+AGENTS = ("openhands", "openhands-orch", "opencode", "kilocode")
 
 PROMPT = (
     "This Maven project's tests pass but do not fully verify class `{cls}`. Raise its PIT "
@@ -27,10 +27,12 @@ PROMPT = (
     "correct JDK container via the `jrun` helper: `jrun <JDK> \'<command>\'` "
     "(e.g. `jrun 17 \'mvn -B -ntp test\'`). FIRST detect the project JDK, then use it for all "
     "commands.\n"
-    "Target ONLY `{cls}` (scope PIT with -DtargetClasses={cls} -DtargetTests={tests}). If the test "
-    "class `{tests}` does not exist yet, CREATE it following the module's existing test conventions "
-    "(assertion library, imports, naming, given/when/then). Add JUnit test methods that make the suite "
-    "detect the surviving mutants (raise the mutation score); do NOT modify or weaken existing tests. "
+    "Target ONLY `{cls}` (scope PIT with -DtargetClasses={cls} -DtargetTests={tests}). You are the "
+    "TEST-MANAGER: for EACH method of `{cls}`, delegate a fresh `mutation-tester` sub-agent (sequential, "
+    "one method at a time) that APPENDS JUnit tests to detect that method's surviving mutants; do NOT write "
+    "tests in your own context. The sub-agents create `{tests}` if absent following the module's "
+    "conventions (assertion library, imports, naming, given/when/then) and only ever append, never "
+    "modifying or weakening an existing test. "
     "Finish only when the scoped PIT mutation score is higher, all tests are green, and a "
     "separate judge sub-agent (not the writer) has scored the added tests at reward 1.0, "
     "following the skill judging step in sections 5 and 6. A self-score does not count; "
@@ -77,7 +79,7 @@ def _spec(agent, abs_repo, prompt, timeout):
     """Return (image, env_list, inner_cmd) for one agent leg."""
     key = env("OC_KEY") or env("QWEN_API_KEY")
     q = shlex.quote(prompt)
-    if agent == "openhands":
+    if agent in ("openhands", "openhands-orch"):
         slug = os.path.basename(abs_repo.rstrip("/")) + "-" + str(int(time.time()))
         ev_log = str(CORPUS / "dialogs" / (slug + ".jsonl"))
         persist = str(CORPUS / "dialogs" / (slug + "-tree"))
@@ -86,7 +88,7 @@ def _spec(agent, abs_repo, prompt, timeout):
                 "-e", f"OC_KEY={key}", "-e", "OH_MAX_ITER=100000",
                 "-e", f"OH_EVENT_LOG={ev_log}", "-e", f"OH_PERSIST_DIR={persist}"]
         inner = (f"timeout {AGENT_BACKSTOP} /opt/ohvenv/bin/python "
-                 f"{PROJECT}/src/panel_oh_run.py {abs_repo} {q}")
+                 f"{PROJECT}/src/{'panel_oh_run.py' if agent == 'openhands' else 'panel_oh_manager.py'} {abs_repo} {q}")
         return "ijt-panel-openhands", envs, inner, ev_log
     # node agents (opencode / kilocode) share one image + config-copy idiom
     envs = ["-e", f"OC_KEY={key}", "-e", f"OPENAI_API_KEY={key}", "-e", f"QWEN_API_KEY={key}"]
@@ -209,7 +211,11 @@ def run_agent(agent, repo_dir, target_class, target_tests, test_file, src_file,
     log("medium", "panel_start", agent=agent, repo=repo_dir, cls=target_class,
         score_before=round(base["score"], 4), survivors=len(base["survivors"]))
 
-    prompt = PROMPT.format(cls=target_class, tests=target_tests, skill=SKILL_REL)
+    if agent == "openhands-orch":
+        import manager_prompt as _mp
+        prompt = _mp.build(target_class, target_tests, jdk, base["survivors"])
+    else:
+        prompt = PROMPT.format(cls=target_class, tests=target_tests, skill=SKILL_REL)
     rc, out = _run_container(agent, abs_repo, prompt, timeout)
     try:
         tdir = CORPUS / "panel" / "transcripts"

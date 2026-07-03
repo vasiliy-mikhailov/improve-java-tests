@@ -119,7 +119,7 @@ def parse_report(path):
     killed = sum(counts[s] for s in DETECTED)
     score = killed / total if total else 0.0
     survivors.sort(key=lambda s: (s["sourceFile"], s["lineNumber"]))
-    return {"total": total, "killed": killed, "survived": total - killed,
+    return {"total": total, "killed": killed, "survived": len(survivors),
             "score": score, "counts": dict(counts), "survivors": survivors}
 
 

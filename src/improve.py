@@ -13,6 +13,7 @@ import draw, gate, panel, pit, corpus_queue
 from common import PROJECT, CORPUS, DATA, log
 
 IMPROVE_WORKERS = int(os.environ.get("IMPROVE_WORKERS", "2"))
+_AGENT = os.environ.get("IMPROVE_AGENT", "openhands")
 # Fair scheduling: ONE LANE PER REPO, but a repo processes at most this many files per cycle (across
 # all its modules) then yields its lane so other repos get worked and the draw re-interleaves. Under
 # 'take every class' a repo can hold thousands of mains; without this a giant repo would pin a lane for
@@ -63,7 +64,7 @@ def _run_one(t, open_pr):
     dest = "clones/improve_" + t["repo"].replace("/", "_") + "__" + t["target_class"].replace(".", "_")
     try:
         gate.clone(t["repo"], dest=str(DATA / dest))
-        r = panel.run_agent("openhands", dest, t["target_class"], t["target_tests"],
+        r = panel.run_agent(_AGENT, dest, t["target_class"], t["target_tests"],
                             t["test_file"], t["src_file"], jdk=t.get("jdk"),
                             timeout=31_536_000, open_pr=open_pr, has_test=t.get("has_test", True))
         _score_line(t["repo"], t["target_class"], r)
@@ -166,7 +167,7 @@ def _run_repo(repo, jdk, modules, has_pr):
                 if base_ref:
                     _reset_worktree(real, base_ref)
                 try:
-                    r = panel.run_agent("openhands", dest, t["target_class"], t["target_tests"],
+                    r = panel.run_agent(_AGENT, dest, t["target_class"], t["target_tests"],
                                         t["test_file"], t["src_file"], jdk=jdk_used,
                                         timeout=31_536_000, open_pr=(t["target_class"] not in has_pr),
                                         module_ctx=ctx, module_built=True, has_test=t.get("has_test", True))
@@ -185,17 +186,26 @@ def _run_repo(repo, jdk, modules, has_pr):
 
 
 def _reap_orphan_containers():
-    """On a fresh start every ijt-panel-openhands container is an orphan from a prior improve.py
-    instance that died (a restart) -- its stall-detector died with it, so it would hang forever.
-    Remove them all so restarts are self-cleaning (the fresh loop has spawned none of its own yet)."""
-    try:
-        cids = subprocess.run(["docker", "ps", "-q", "--filter", "name=ijt-panel-openhands"],
-                              capture_output=True, text=True, timeout=60).stdout.split()
+    """On a fresh start every panel-openhands container (ijt- or a leftover jmt- from before a rename)
+    is an orphan from a prior improve.py that died -- its stall-detector died with it, so it hangs to
+    its ~1y inner timeout. So do the leaked ijt/jmt SANDBOX containers (a killed `docker run --rm` CLI
+    never removed them). The fresh loop has spawned none of its own yet, so anything matching is an
+    orphan; reaping both keeps restarts self-cleaning and the host un-oversubscribed."""
+    def _rm(cids):
         for cid in cids:
             subprocess.run(["docker", "rm", "-f", cid],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-        if cids:
-            log("slow", "reaped_orphan_panels", n=len(cids))
+    try:
+        panels = subprocess.run(["docker", "ps", "-q", "--filter", "name=panel-openhands"],
+                                capture_output=True, text=True, timeout=60).stdout.split()
+        _rm(panels)
+        rows = subprocess.run(["docker", "ps", "--format", "{{.ID}} {{.Image}}"],
+                              capture_output=True, text=True, timeout=60).stdout.splitlines()
+        sandboxes = [r.split()[0] for r in rows if r.split()
+                     and ("improve-java-tests-sandbox" in r or "mutation-testing-sandbox" in r)]
+        _rm(sandboxes)
+        if panels or sandboxes:
+            log("slow", "reaped_orphans", panels=len(panels), sandboxes=len(sandboxes))
     except Exception as e:
         log("medium", "reap_orphans_err", err=str(e)[:120])
 

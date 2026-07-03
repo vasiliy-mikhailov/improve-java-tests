@@ -8,6 +8,13 @@ RUN pip3 install --no-cache-dir --break-system-packages uv \
 RUN uv venv --python 3.12 /opt/ohvenv \
  && uv pip install --python /opt/ohvenv/bin/python \
       openhands-sdk==1.26.0 openhands-tools==1.26.0
+# P2 (no pre-defense / stoicism): file_editor's `view` truncates its result at MAX_RESPONSE_LEN_CHAR.
+# 16000 clipped SKILL.md's mergeability rubric (line 228+) so `mutation-tester` writers never received
+# it and wrote assertDoesNotThrow coverage-theater. 128000 is stoic: the full ~30k skill fits in one view.
+RUN sed -i 's/MAX_RESPONSE_LEN_CHAR: int = 16000/MAX_RESPONSE_LEN_CHAR: int = 128000/' \
+      /opt/ohvenv/lib/python3.12/site-packages/openhands/tools/file_editor/utils/constants.py \
+      /opt/ohvenv/lib/python3.12/site-packages/openhands/tools/file_editor/utils/config.py \
+ && grep -H "MAX_RESPONSE_LEN_CHAR: int" /opt/ohvenv/lib/python3.12/site-packages/openhands/tools/file_editor/utils/constants.py
 RUN install -m 0755 -d /etc/apt/keyrings \
  && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
  && chmod a+r /etc/apt/keyrings/docker.asc \
